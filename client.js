@@ -109,8 +109,6 @@ window.__ModuleLoader__.load({
         panelTitle: '任务面板',
         reset: '复位',
         resetTitle: '回到默认位置（右上角）',
-        dragbarDrag: '自由拖拽',
-        dragbarCollapse: '点击折叠',
         editHint: '点击即可编辑，输入后自动保存',
         shortcutHint: '按 R 键显示或隐藏任务面板',
         zoomHint: '按住 Ctrl 滚动滚轮（或 Ctrl + ＋/ Ctrl + −）调整字号',
@@ -165,8 +163,6 @@ window.__ModuleLoader__.load({
         panelTitle: 'Tasks',
         reset: 'Reset',
         resetTitle: 'Back to the default spot (top right)',
-        dragbarDrag: 'Drag freely',
-        dragbarCollapse: 'Click to collapse',
         editHint: 'Click to edit; saves as you type',
         shortcutHint: 'Press R to show or hide the task panel',
         zoomHint: 'Hold Ctrl and scroll (or Ctrl + plus / Ctrl + minus) to change the font size',
@@ -2014,9 +2010,14 @@ window.__ModuleLoader__.load({
       },
         h('div', { className: 'wf-dragbar-left' }, panelTools),
         h('div', { className: 'wf-dragbar-right' },
-          h('span', { className: 'wf-dragbar-labels' },
-            h('span', { className: 'wf-dragbar-side' }, t(lang, 'dragbarCollapse')),
-            h('span', { className: 'wf-dragbar-side' }, t(lang, 'dragbarDrag'))),
+          h('span', { className: 'wf-dragbar-grip', title: t(lang, 'dragbarHint'), 'aria-hidden': 'true' },
+            h('svg', { className: 'wf-grip', viewBox: '0 0 14 22', width: 14, height: 22, focusable: 'false' },
+              h('circle', { cx: 3, cy: 4, r: 2, fill: 'currentColor' }),
+              h('circle', { cx: 11, cy: 4, r: 2, fill: 'currentColor' }),
+              h('circle', { cx: 3, cy: 11, r: 2, fill: 'currentColor' }),
+              h('circle', { cx: 11, cy: 11, r: 2, fill: 'currentColor' }),
+              h('circle', { cx: 3, cy: 18, r: 2, fill: 'currentColor' }),
+              h('circle', { cx: 11, cy: 18, r: 2, fill: 'currentColor' }))),
           h(PanelThemeButton, null)))
 
       if (collapsed) {
@@ -2158,9 +2159,13 @@ window.__ModuleLoader__.load({
       .wf-dragbar-left { display: flex; align-items: center; gap: 2ch; min-width: 0; overflow: hidden; }
       .wf-dragbar-right { display: flex; align-items: center; gap: 8px; flex: none; }
       .wf-vline { flex: none; width: 1px; height: 14px; background: currentColor; opacity: .22; }
-      .wf-dragbar-labels { display: flex; flex-direction: column; align-items: flex-end;
-        justify-content: center; gap: 1px; line-height: 1.2; }
-      .wf-dragbar-side { font-size: .51em; opacity: .62; letter-spacing: .02em; white-space: nowrap; }
+      .wf-dragbar-grip { display: inline-flex; align-items: center; justify-content: center;
+        width: 22px; height: 30px; border-radius: 6px; color: #f4f4f5;
+        opacity: .56; transition: opacity .15s ease, background .15s ease; cursor: grab; }
+      .wf-dragbar:hover .wf-dragbar-grip { opacity: .9; }
+      .wf-dragbar:active .wf-dragbar-grip { cursor: grabbing; opacity: .92; }
+      .wf-grip { display: block; }
+      .wf-theme-light .wf-dragbar-grip { color: #3a4150; opacity: .6; }
       .wf-kbd { display: inline-flex; align-items: center; justify-content: center;
         width: 36px; height: 36px; padding: 0; border-radius: 8px;
         font-size: 17px; font-weight: 700; line-height: 1; color: #f2f4f8;

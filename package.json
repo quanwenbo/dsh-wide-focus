@@ -1,6 +1,6 @@
 {
   "name": "dsh-wide-focus",
-  "version": "0.11.18",
+  "version": "0.11.19",
   "description": "DSH Web 客户端的宽读模式与可拖动悬浮任务面板（四标签、快捷键、本机持久化）",
   "license": "MIT",
   "author": "BOB",
