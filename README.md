@@ -151,8 +151,8 @@ node --test tests.mjs # pure helpers (splitTaskText, moveTaskInList, ...)
 - Dragging is pointer-based and needs a mouse or pen; there is no keyboard
   reordering.
 - Deleting a task is a two-step confirm, with no undo.
-- Task numbers are re-assigned from the visible list, so accepting a task can
-  shift the numbers below it.
+- Task numbers are the visible row order inside the current tab (1..n) and are
+  recomputed on every change: drag, status move, accept, new task.
 
 ## License
 

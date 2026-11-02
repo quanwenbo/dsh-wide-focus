@@ -54,7 +54,39 @@ const plugin = spec.factory((name) => {
   if (name === 'react') return fakeReact
   throw new Error(`unexpected require(${name})`)
 })
-const { splitTaskText, moveTaskInList, normalizeTask, splitKeyword } = plugin.__test
+const { splitTaskText, moveTaskInList, normalizeTask, splitKeyword, panelDragPreview, numberTasks } = plugin.__test
+
+// Regression: a task drag used to resolve to `undefined` here, and the render
+// path then read `.x` off it, which crashed the whole panel with "渲染出错".
+test('panelDragPreview ignores task drags', () => {
+  assert.equal(panelDragPreview(null), null)
+  assert.equal(panelDragPreview(undefined), null)
+  assert.equal(panelDragPreview({ mode: 'task', moved: true }), null)
+  assert.equal(panelDragPreview({ mode: 'panel', moved: false, next: { x: 1, y: 2 } }), null)
+  assert.equal(panelDragPreview({ mode: 'panel', moved: true }), null)
+  assert.deepEqual(panelDragPreview({ mode: 'panel', moved: true, next: { x: 1, y: 2 } }), { x: 1, y: 2 })
+})
+
+test('numberTasks numbers the visible rows 1..n from the top', () => {
+  const map = numberTasks([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
+  assert.deepEqual([...map.entries()], [['a', 1], ['b', 2], ['c', 3]])
+  assert.equal(numberTasks([]).size, 0)
+})
+
+test('numbers follow the visible order after a drag, not the old order', () => {
+  const list = [
+    { id: 'a', title: 'a', status: 'in_progress', order: 10 },
+    { id: 'b', title: 'b', status: 'in_progress', order: 20 },
+    { id: 'c', title: 'c', status: 'in_progress', order: 30 },
+  ]
+  const moved = moveTaskInList(list, 'in_progress', 'c', 'a', false)
+  const visible = moved.filter((task) => task.status === 'in_progress').sort((x, y) => x.order - y.order)
+  const numbers = numberTasks(visible)
+  assert.deepEqual(visible.map((task) => task.id), ['c', 'a', 'b'])
+  assert.equal(numbers.get('c'), 1)
+  assert.equal(numbers.get('a'), 2)
+  assert.equal(numbers.get('b'), 3)
+})
 
 test('splitTaskText keeps the first line as title and the rest as body', () => {
   const parsed = splitTaskText('第一段标题\n\n第二段内容\n第三行')

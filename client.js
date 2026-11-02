@@ -488,6 +488,26 @@ window.__ModuleLoader__.load({
       return { title, body: lines.slice(1).join('\n').trim() }
     }
 
+    /**
+     * A panel drag is the only drag that carries a window position preview.
+     * Task drags reuse the same ref for row ordering and have no `next`;
+     * returning null keeps the render path on a value it can use.
+     */
+    /**
+     * Numbers are derived from the visible order inside one tab: every change
+     * (drag, status move, accept, new task) renumbers 1..n immediately.
+     */
+    function numberTasks(column) {
+      const map = new Map()
+      column.forEach((task, index) => { map.set(task.id, index + 1) })
+      return map
+    }
+
+    function panelDragPreview(drag) {
+      if (!drag || drag.mode !== 'panel' || !drag.moved) return null
+      return drag.next || null
+    }
+
     function moveTaskInList(list, targetStatus, draggedId, targetId, placeAfter) {
       const moved = list.find((task) => task.id === draggedId)
       if (!moved) return list
@@ -1268,9 +1288,8 @@ window.__ModuleLoader__.load({
       const total = tasks.length
 
       const numberMap = new Map()
-      let counter = 0
       for (const column of columns) {
-        for (const task of column.tasks) numberMap.set(task.id, ++counter)
+        for (const [id, number] of numberTasks(column.tasks)) numberMap.set(id, number)
       }
 
       useEffect(() => {
@@ -1778,7 +1797,7 @@ window.__ModuleLoader__.load({
       const activeColumn = columns.find((column) => column.key === activeTab) || columns[0]
 
       const sizeStyle = { width: `${size.width}px`, height: `${size.height}px`, maxHeight: 'none', fontSize: `${fontSize}px` }
-      const liveDrag = dragRef.current !== null && dragRef.current.moved ? dragRef.current.next : null
+      const liveDrag = panelDragPreview(dragRef.current)
       const defaultAnchor = {
         x: Math.max(8, viewport.width - 100 - size.width),
         y: Math.min(100, Math.max(8, viewport.height - 120)),
@@ -2224,7 +2243,7 @@ window.__ModuleLoader__.load({
 
     return {
       inject: ['slots'],
-      __test: { splitTaskText, moveTaskInList, normalizeTask, splitKeyword: stripKeyword },
+      __test: { splitTaskText, moveTaskInList, normalizeTask, splitKeyword: stripKeyword, panelDragPreview, numberTasks },
       apply(ctx) {
         stripReloadParam()
 
