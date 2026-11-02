@@ -15,7 +15,7 @@ own (the panel talks to its own host route, see *Storage* below).
 
 ```powershell
 # 1) 从 AtomGit（公开仓库，固定 commit）
-dsh plugin --profile desktop add git+https://atomgit.com/17725785770/dsh-wide-focus.git#<commit-sha>
+dsh plugin --profile desktop add git+https://github.com/quanwenbo/dsh-wide-focus.git#<commit-sha>
 
 # 2) 从本地目录（开发时）
 dsh plugin --profile desktop add C:\Users\BOB\dsh-plugins\wide-focus

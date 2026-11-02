@@ -6,11 +6,11 @@
   "author": "BOB",
   "repository": {
     "type": "git",
-    "url": "git+https://atomgit.com/17725785770/dsh-wide-focus.git"
+    "url": "git+https://github.com/quanwenbo/dsh-wide-focus.git"
   },
-  "homepage": "https://atomgit.com/17725785770/dsh-wide-focus",
+  "homepage": "https://github.com/quanwenbo/dsh-wide-focus",
   "bugs": {
-    "url": "https://atomgit.com/17725785770/dsh-wide-focus/issues"
+    "url": "https://github.com/quanwenbo/dsh-wide-focus/issues"
   },
   "keywords": [
     "dsh",
