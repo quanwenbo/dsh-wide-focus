@@ -186,6 +186,8 @@ node --test tests.mjs # pure helpers (splitTaskText, moveTaskInList, ...)
 
 - The wide column is re-asserted every 400 ms while enabled; there is no
   ResizeObserver hook into the host.
+- Responsive tiers are keyed to the panel width (< 480 px collapses tab
+  labels, < 360 px hides the Ctrl hint); they are not container queries.
 - Dragging is pointer-based and needs a mouse or pen; there is no keyboard
   reordering.
 - Deleting a task is a two-step confirm, with no undo.
