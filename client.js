@@ -66,6 +66,11 @@ window.__ModuleLoader__.load({
     // The four board tabs; the accepted tab is permanent now that columns are tabs.
     const TABS = [...STATUSES, { key: 'done', label: 'sectionDone', css: '#6b7280' }]
 
+    function firstGlyph(text) {
+      const chars = Array.from(String(text || ''))
+      return chars.length > 0 ? chars[0] : ''
+    }
+
     function tabCss(key) {
       return (TABS.find((tab) => tab.key === key) || {}).css || '#7d92ff'
     }
@@ -1531,7 +1536,7 @@ window.__ModuleLoader__.load({
         const height = clamp(session.startRect.height + dy, 220, maxHeight)
         if (session.side === 'left') {
           const maxForLeft = Math.max(260, session.startRect.right - 8)
-          const width = clamp(session.startRect.width - dx, 260, Math.min(maxWidth, maxForLeft))
+          const width = clamp(session.startRect.width - dx, 300, Math.min(maxWidth, maxForLeft))
           session.next = {
             width,
             height,
@@ -1539,7 +1544,7 @@ window.__ModuleLoader__.load({
             top: session.startRect.top,
           }
         } else {
-          const width = clamp(session.startRect.width + dx, 260, maxWidth)
+          const width = clamp(session.startRect.width + dx, 300, maxWidth)
           session.next = { width, height, left: null, top: null }
         }
         if (session.frame) return
@@ -1942,6 +1947,9 @@ window.__ModuleLoader__.load({
               }, confirmId === task.id ? t(lang, 'deleteConfirm') : t(lang, 'deleteTask'))))) : null)
       }
 
+      const panelNarrow = size.width < 480
+      const panelTiny = size.width < 360
+
       const tabsNode = h('div', { className: 'wf-tabs', role: 'tablist', 'aria-label': t(lang, 'panelTitle') },
         columns.map((column) => h('button', {
           key: column.key,
@@ -1949,6 +1957,7 @@ window.__ModuleLoader__.load({
           role: 'tab',
           'aria-selected': activeTab === column.key ? 'true' : 'false',
           'data-tab': column.key,
+          title: t(lang, column.label),
           className: [
             'wf-tab',
             activeTab === column.key ? 'wf-tab-on' : '',
@@ -1960,7 +1969,8 @@ window.__ModuleLoader__.load({
           onClick: () => switchTab(column.key),
         },
           h('span', { className: 'wf-tab-dot', style: { background: column.css } }),
-          h('span', { className: 'wf-tab-label' }, t(lang, column.label)),
+          h('span', { className: 'wf-tab-label wf-tab-label-full' }, t(lang, column.label)),
+          h('span', { className: 'wf-tab-label wf-tab-label-short' }, firstGlyph(t(lang, column.label))),
           h('span', { className: 'wf-tab-count' }, String(column.tasks.length)))))
 
       const activeColumn = columns.find((column) => column.key === activeTab) || columns[0]
@@ -2045,7 +2055,12 @@ window.__ModuleLoader__.load({
       return h(React.Fragment, null,
         h('aside', {
           ref: panelRef,
-          className: theme === 'light' ? 'wf-panel wf-theme-light' : 'wf-panel',
+          className: [
+            'wf-panel',
+            theme === 'light' ? 'wf-theme-light' : '',
+            panelNarrow ? 'wf-panel-narrow' : '',
+            panelTiny ? 'wf-panel-tiny' : '',
+          ].filter(Boolean).join(' '),
           style: positionStyle ? { ...positionStyle, ...sizeStyle } : sizeStyle,
           'data-width-focus': 'panel',
         },
@@ -2250,7 +2265,7 @@ window.__ModuleLoader__.load({
       .wf-panel-body::-webkit-scrollbar { width: 8px; }
       .wf-panel-body::-webkit-scrollbar-thumb { background: rgba(127,127,127,.3); border-radius: 8px; }
       .wf-tabs { display: flex; align-items: center; gap: 6px; padding: 6px 10px 8px; }
-      .wf-tab { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center;
+      .wf-tab { flex: 1 1 0; min-width: 0; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;
         gap: 6px; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid transparent;
         background: transparent; color: inherit; font: inherit; font-size: .8em; font-weight: 600;
         letter-spacing: .03em; cursor: pointer; opacity: .6; white-space: nowrap; }
@@ -2325,6 +2340,19 @@ window.__ModuleLoader__.load({
         100% { color: #ffffff; text-shadow: 0 0 6px rgba(224,242,254,.95), 0 0 14px rgba(56,189,248,.9), 0 0 26px rgba(56,189,248,.55); }
       }
       .wf-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .wf-panel-narrow .wf-tabs { margin: 6px 6px 4px; padding: 4px; gap: 3px; }
+      .wf-panel-narrow .wf-tab { padding: 0 5px; gap: 4px; font-size: .78em; }
+      .wf-tab-label-short { display: none; }
+      .wf-panel-narrow .wf-tab-label-full { display: none; }
+      .wf-panel-narrow .wf-tab-label-short { display: inline; }
+      .wf-panel-narrow .wf-tab-count { font-size: .88em; opacity: .8; }
+      .wf-panel-tiny .wf-tab { padding: 0 4px; gap: 3px; font-size: .72em; }
+      .wf-panel-tiny .wf-tab-dot { width: 5px; height: 5px; }
+      .wf-panel-narrow .wf-panel-tools { gap: 9px; }
+      .wf-panel-narrow .wf-kbd-ctrl { padding: 0 8px; gap: 4px; }
+      .wf-panel-tiny .wf-kbd-ctrl { display: none; }
+      .wf-panel-narrow .wf-dragbar { padding: 0 8px; gap: 8px; }
+      .wf-panel-narrow .wf-task-head { gap: 6px; }
       .wf-tabpanel { display: flex; flex-direction: column; }
       .wf-task-done .wf-task-head { opacity: .55; }
       .wf-task-done .wf-task-title { text-decoration: line-through; }

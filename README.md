@@ -112,8 +112,8 @@ Four tabs, in this order: **待验收 / 进行中 / 暂时搁置 / 已验收**.
 
 The panel owns its palette; it never follows the host theme.
 
-- One 45 × 36 button in the left tool row (third stop, after `R` and
-  `Ctrl` + wheel), no border and no background until hover, with transparent
+- One 45 × 36 button in the top-right corner (left of the six-dot grip), no
+  border and no background until hover, with transparent
   corners: a round taiji (☯) inside — light field, dark half, two opposite
   seeds. Clicking it switches the panel between dark and light; the disc
   rotates 180° as feedback, and the choice persists in
@@ -122,6 +122,22 @@ The panel owns its palette; it never follows the host theme.
   the light palette is `#ffffff` shell → `#18181b` title band → `#2563eb` body.
   Status colours: 暂时搁置 `#9a9aa5`, 进行中 `#60a5fa`, 待验收 `#fbbf24`,
   已验收 `#6b7280`.
+
+## Narrow widths (responsive)
+
+The panel degrades by its own width instead of squeezing text:
+
+| Panel width | Layout |
+| --- | --- |
+| ≥ 480 px | full tab labels + counts |
+| 360–479 px | one-character tab labels (待 / 进 / 暂 / 已) + counts, full name on hover |
+| < 360 px | same, plus the `Ctrl` keycap hint is hidden (only `R` and the context chip remain) |
+
+- The minimum resize width is 300 px; the drag handles stop there.
+- Tabs, counts and task titles never wrap; long titles truncate with an
+  ellipsis and show their body when expanded.
+- The drag hint is a six-dot grip icon next to the theme switch (the whole
+  title bar is still the drag surface and still toggles on click).
 
 ## Storage
 
