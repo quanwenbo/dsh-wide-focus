@@ -7,8 +7,7 @@
  *    inline, so it resolves against the real column instead of a measured px.
  * 2. Floating task panel: a self-contained local todo board. No taskboard, no
  *    network — tasks live in `<DSH_HOME>/wide-focus/tasks.json` via the host
- *    half, and can be dragged, re-ordered and moved through todo → doing →
- *    review. Font size is adjustable 10–28px.
+ *    half, and can be dragged, re-ordered and moved through todo → doing →  *    review. Font size is adjustable 10–8px.
  */
 
 window.__ModuleLoader__.load({
@@ -67,6 +66,10 @@ window.__ModuleLoader__.load({
     // The four board tabs; the accepted tab is permanent now that columns are tabs.
     const TABS = [...STATUSES, { key: 'done', label: 'sectionDone', css: '#6b7280' }]
 
+    function tabCss(key) {
+      return (TABS.find((tab) => tab.key === key) || {}).css || '#7d92ff'
+    }
+
     function stripReloadParam() {
       try {
         const url = new URL(window.location.href)
@@ -96,7 +99,7 @@ window.__ModuleLoader__.load({
         toggleOff: '标准',
         toggleOnTitle: '宽屏阅读已开启：内容占满可用宽度，仅留边距。点击恢复默认宽度。',
         toggleOffTitle: '当前为默认宽度。点击开启宽屏阅读。',
-        themeToDark: '切换到深色主题',
+        themeToDark: '切换到深色主题。',
         pageReload: '异常恢复',
         pageReloadTitle: '异常恢复：清空面板位置与尺寸，再重新加载客户端（会先确认）。',
         reloadConfirmTitle: '异常恢复？',
@@ -110,13 +113,17 @@ window.__ModuleLoader__.load({
         dragbarCollapse: '点击折叠',
         editHint: '点击即可编辑，输入后自动保存',
         shortcutHint: '按 R 键显示或隐藏任务面板',
-        zoomHint: '按住 Ctrl 滚动滚轮（或 Ctrl + ＋ / Ctrl + −）调整字号',
+        zoomHint: '按住 Ctrl 滚动滚轮（或 Ctrl + ＋/ Ctrl + −）调整字号',
         editPlaceholder: '',
         dragbarHint: '拖动移动 · 点击折叠',
         expandTitle: '展开任务面板',
-        empty1: '还没有待办。点下面的「＋ 添加待办」新建一条',
+        empty1: '还没有待办。点下面的「＋ 添加待办」新建一条。',
         empty2: '在聊天里选中文字，右键 →「加入待办」',
+        addTask: '加入待办',
+        added: '已加入',
+        movedTo: '已移到',
         emptyTab: '这个分类暂时没有任务。',
+      dropHere: '放到这里',
         addTodo: '添加待办',
         manualPlaceholder: '输入待办内容，回车添加',
         manualSave: '添加',
@@ -168,7 +175,11 @@ window.__ModuleLoader__.load({
         expandTitle: 'Open the task panel',
         empty1: 'No todos yet. Use "＋ Add a todo" below to create one.',
         empty2: 'Select text in the chat, right-click → "Add a todo".',
+        addTask: 'Add a todo',
+        added: 'Added',
+        movedTo: 'Moved to',
         emptyTab: 'Nothing in this category yet.',
+      dropHere: 'Drop here',
         addTodo: 'Add a todo',
         manualPlaceholder: 'Type a todo, press Enter',
         manualSave: 'Add',
@@ -1243,7 +1254,23 @@ window.__ModuleLoader__.load({
       const [draggingId, setDraggingId] = useState(null)
       const [hoverId, setHoverId] = useState(null)
       const [dropTab, setDropTab] = useState(null)
+      const [dropAt, setDropAt] = useState(null)
       const activeTabRef = useRef(activeTab)
+      const [ghost, setGhost] = useState(null)
+      const [flashId, setFlashId] = useState(null)
+      const [passTab, setPassTab] = useState(null)
+      const [freshTab, setFreshTab] = useState(null)
+      const [moveNotice, setMoveNotice] = useState(null)
+      const ghostRaf = useRef(0)
+      const flashTimer = useRef(0)
+      const passTimer = useRef(0)
+      const freshTimer = useRef(0)
+      const noticeTimer = useRef(0)
+      const langRef = useRef(lang)
+      langRef.current = lang
+      const ghostRef = useRef(null)
+      ghostRef.current = ghost
+      const ghostClearTimer = useRef(0)
       const [confirmId, setConfirmId] = useState(null)
       const [draft, setDraft] = useState(null)
       const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }))
@@ -1260,6 +1287,15 @@ window.__ModuleLoader__.load({
         const timer = window.setTimeout(() => setJumpNote(null), 7000)
         return () => window.clearTimeout(timer)
       }, [jumpNote])
+
+      useEffect(() => () => {
+        window.cancelAnimationFrame(ghostRaf.current)
+        window.clearTimeout(flashTimer.current)
+        window.clearTimeout(passTimer.current)
+        window.clearTimeout(freshTimer.current)
+        window.clearTimeout(ghostClearTimer.current)
+        window.clearTimeout(noticeTimer.current)
+      }, [])
 
       useEffect(() => {
         const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight })
@@ -1527,6 +1563,25 @@ window.__ModuleLoader__.load({
       }, [])
 
       useEffect(() => {
+        const hitInsertion = (clientY, draggedId) => {
+          const body = bodyRef.current
+          if (!body) return null
+          const box = body.getBoundingClientRect()
+          if (clientY < box.top - 8 || clientY > box.bottom + 8) return null
+          const rows = []
+          try {
+            body.querySelectorAll('[data-task-id]').forEach((element) => {
+              const id = element.getAttribute('data-task-id')
+              if (id && id !== draggedId) rows.push({ id, rect: element.getBoundingClientRect() })
+            })
+          } catch { return null }
+          if (rows.length === 0) return null
+          for (const row of rows) {
+            if (clientY < row.rect.top + row.rect.height / 2) return { id: row.id, after: false }
+          }
+          return { id: rows[rows.length - 1].id, after: true }
+        }
+
         const onMove = (event) => {
           if (resizeRef.current) { moveResize(event); return }
           const drag = dragRef.current
@@ -1551,34 +1606,73 @@ window.__ModuleLoader__.load({
             if (tabKey === activeTabRef.current) {
               if (drag.target !== null && drag.target.tab) { drag.target = null; setDropTab(null) }
               setHoverId(null)
+              setDropAt(null)
               return
             }
             if (drag.target === null || drag.target.tab !== tabKey) {
               drag.target = { tab: tabKey }
               setDropTab(tabKey)
               setHoverId(null)
+              setDropAt(null)
+            }
+            if (element && element.closest && ghostRaf.current === 0) {
+              let tabRect = null
+              let panelRect = null
+              try {
+                tabRect = element.closest('[data-tab]').getBoundingClientRect()
+                panelRect = panelRef.current ? panelRef.current.getBoundingClientRect() : null
+              } catch { tabRect = null }
+              if (tabRect && panelRect) {
+                const width = Math.max(48, Math.round(tabRect.width * 0.8))
+                ghostRaf.current = window.requestAnimationFrame(() => {
+                  ghostRaf.current = 0
+                  setGhost({
+                    x: tabRect.left - panelRect.left + tabRect.width / 2,
+                    y: tabRect.top - panelRect.top + tabRect.height / 2,
+                    title: drag.title || '',
+                    color: drag.color || '#7d92ff',
+                    compact: width,
+                  })
+                })
+              }
             }
             return
           }
           setDropTab(null)
+          if (ghostRaf.current === 0) {
+            const ghostX = event.clientX
+            const ghostY = event.clientY
+            ghostRaf.current = window.requestAnimationFrame(() => {
+              ghostRaf.current = 0
+              const rect = panelRef.current ? panelRef.current.getBoundingClientRect() : null
+              if (!rect) return
+              setGhost({
+                x: Math.max(0, ghostX - rect.left + 14),
+                y: Math.max(0, ghostY - rect.top + 10),
+                title: drag.title || '',
+                color: drag.color || '#7d92ff',
+              })
+            })
+          }
           if (header !== null) {
             const target = { id: null, after: true, status: header.getAttribute('data-drop-status') }
             if (drag.target === null || drag.target.status !== target.status || drag.target.id !== null) {
               drag.target = target
               setHoverId(null)
+              setDropAt(null)
             }
             return
           }
-          if (!row || row.getAttribute('data-task-id') === drag.id) {
-            if (drag.target !== null) { drag.target = null; setHoverId(null) }
+          const insertion = hitInsertion(event.clientY, drag.id)
+          if (insertion === null) {
+            if (drag.target !== null) { drag.target = null; setHoverId(null); setDropAt(null) }
             return
           }
-          const rect = row.getBoundingClientRect()
-          const after = event.clientY > rect.top + rect.height / 2
-          const target = { id: row.getAttribute('data-task-id'), after, status: row.getAttribute('data-status') }
-          if (drag.target === null || drag.target.id !== target.id || drag.target.after !== target.after) {
+          const target = { id: insertion.id, after: insertion.after, status: activeTabRef.current }
+          if (drag.target === null || drag.target.id !== target.id || drag.target.after !== target.after || drag.target.status !== target.status) {
             drag.target = target
-            setHoverId(target.id)
+            setHoverId(insertion.id)
+            setDropAt({ id: insertion.id, after: insertion.after })
           }
         }
         const onUp = () => {
@@ -1590,23 +1684,58 @@ window.__ModuleLoader__.load({
           setDraggingId(null)
           setHoverId(null)
           setDropTab(null)
+          setDropAt(null)
+          const flyingGhost = ghostRef.current
+          if (flyingGhost) {
+            setGhost({ ...flyingGhost, dropping: true })
+            window.clearTimeout(ghostClearTimer.current)
+            ghostClearTimer.current = window.setTimeout(() => setGhost(null), 180)
+          } else {
+            setGhost(null)
+          }
+          window.cancelAnimationFrame(ghostRaf.current)
+          ghostRaf.current = 0
           if (!drag.moved) return
+          let landedTab = null
+          let moved = false
           if (drag.target !== null) {
             try {
               if (drag.target.tab) {
                 moveTaskTo(drag.target.tab, drag.id, null, false)
-                switchTab(drag.target.tab)
-                setOpenId(drag.id)
+                landedTab = drag.target.tab
               } else {
                 moveTaskTo(activeTabRef.current, drag.id, drag.target.id, drag.target.after)
               }
+              moved = true
             } catch (error) {
               try { console.error('[wide-focus] move failed', error) } catch { /* ignore */ }
+            }
+          }
+          if (moved) {
+            window.clearTimeout(flashTimer.current)
+            setFlashId(drag.id)
+            flashTimer.current = window.setTimeout(() => setFlashId(null), 950)
+            if (landedTab !== null) {
+              window.clearTimeout(passTimer.current)
+              window.clearTimeout(ghostClearTimer.current)
+              setPassTab(landedTab)
+              passTimer.current = window.setTimeout(() => setPassTab(null), 700)
+              if (landedTab !== activeTabRef.current) {
+                window.clearTimeout(freshTimer.current)
+                setFreshTab(landedTab)
+                freshTimer.current = window.setTimeout(() => setFreshTab(null), 2000)
+              }
+              const meta = TABS.find((tab) => tab.key === landedTab) || {}
+              const name = t(langRef.current, meta.label || 'statusDoing')
+              window.clearTimeout(noticeTimer.current)
+              setMoveNotice(t(langRef.current, 'movedTo') + '「' + name + '」')
+              noticeTimer.current = window.setTimeout(() => setMoveNotice(null), 1500)
             }
           }
           dragEndAtRef.current = Date.now()
         }
         const onCancel = () => {
+          setDropAt(null)
           if (resizeRef.current) settleResize()
           const drag = dragRef.current
           if (!drag) return
@@ -1615,6 +1744,10 @@ window.__ModuleLoader__.load({
           setDraggingId(null)
           setHoverId(null)
           setDropTab(null)
+          setDropAt(null)
+          setGhost(null)
+          window.cancelAnimationFrame(ghostRaf.current)
+          ghostRaf.current = 0
         }
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
@@ -1631,7 +1764,7 @@ window.__ModuleLoader__.load({
       const armTaskDrag = (event, task) => {
         const startX = event.clientX
         const startY = event.clientY
-        dragRef.current = { mode: 'task', id: task.id, status: task.status, startX, startY, moved: false, target: null }
+        dragRef.current = { mode: 'task', id: task.id, status: task.status, title: task.title, color: tabCss(task.status), startX, startY, moved: false, target: null }
         setDraggingId(task.id)
       }
 
@@ -1640,11 +1773,18 @@ window.__ModuleLoader__.load({
         const startX = event.clientX
         const startY = event.clientY
         window.clearTimeout(longPressRef.current)
-        longPressRef.current = window.setTimeout(() => {
+        const start = () => {
           longPressRef.current = null
-          dragRef.current = { mode: 'task', id: task.id, status: task.status, startX, startY, moved: false, target: null }
+          dragRef.current = { mode: 'task', id: task.id, status: task.status, title: task.title, color: tabCss(task.status), startX, startY, moved: false, target: null }
           setDraggingId(task.id)
-        }, 260)
+        }
+        // Touch keeps a short long-press so scrolling the list still works; a
+        // mouse drag starts on the first movement instead of after a pause.
+        if (event.pointerType === 'touch') {
+          longPressRef.current = window.setTimeout(start, 260)
+          return
+        }
+        start()
       }
 
       const cancelTaskPress = () => {
@@ -1729,6 +1869,7 @@ window.__ModuleLoader__.load({
             task.status === 'done' ? 'wf-task-done' : '',
             draggingId === task.id ? 'wf-task-dragging' : '',
             hoverId === task.id && draggingId !== task.id ? 'wf-task-drop-target' : '',
+            flashId === task.id ? 'wf-task-flash' : '',
           ].filter(Boolean).join(' '),
           'data-task-id': task.id,
           'data-status': task.status,
@@ -1816,6 +1957,8 @@ window.__ModuleLoader__.load({
             'wf-tab',
             activeTab === column.key ? 'wf-tab-on' : '',
             dropTab === column.key ? 'wf-tab-drop' : '',
+            passTab === column.key ? 'wf-tab-pass' : '',
+            freshTab === column.key ? 'wf-tab-fresh' : '',
             column.tasks.length === 0 ? 'wf-tab-empty' : '',
           ].filter(Boolean).join(' '),
           onClick: () => switchTab(column.key),
@@ -1925,14 +2068,42 @@ window.__ModuleLoader__.load({
                 activeColumn.tasks.length === 0
                   ? h('div', { className: 'wf-empty-list' },
                     h('div', { className: 'wf-empty-line' }, t(lang, 'emptyTab')))
-                  : activeColumn.tasks.map((task) => taskRow(task)))),
+                  : (() => {
+                    const rows = activeColumn.tasks
+                    const slotIndex = dropAt === null
+                      ? -1
+                      : rows.reduce((found, task, index) =>
+                        found < 0 && task.id === dropAt.id ? index + (dropAt.after ? 1 : 0) : found, -1)
+                    const slot = h('div', { className: 'wf-drop-slot', 'aria-hidden': 'true' },
+                      h('span', { className: 'wf-drop-slot-label' }, t(lang, 'dropHere')))
+                    return rows.map((task, index) => [
+                      slotIndex === index ? slot : null,
+                      taskRow(task),
+                    ]).concat(slotIndex === rows.length ? [slot] : [])
+                  })()),
+            moveNotice ? h('div', { className: 'wf-move-notice', role: 'status' }, moveNotice) : null,
+            ghost
+              ? h('div', {
+                className: ghost.dropping ? 'wf-drag-ghost wf-dropping' : 'wf-drag-ghost',
+                style: {
+                  left: ghost.x + 'px',
+                  top: ghost.y + 'px',
+                  borderColor: ghost.color,
+                  maxWidth: ghost.compact ? ghost.compact + 'px' : undefined,
+                  fontSize: ghost.compact ? '.7em' : undefined,
+                  padding: ghost.compact ? '3px 8px' : undefined,
+                },
+              },
+                h('span', { className: 'wf-drag-ghost-dot', style: { background: ghost.color } }),
+                h('span', { className: 'wf-drag-ghost-title' }, ghost.title))
+              : null),
           h('div', { className: draft === null ? 'wf-panel-add' : 'wf-panel-add wf-add-editing' },
             draft === null
               ? h('button', {
                 type: 'button',
                 className: 'wf-add-todo',
                 onClick: () => setDraft(''),
-              }, '＋ ' + t(lang, 'addTodo'))
+              }, '＋' + t(lang, 'addTodo'))
               : h(React.Fragment, null,
                 h(DraftBox, {
                   lang,
@@ -2056,9 +2227,73 @@ window.__ModuleLoader__.load({
       .wf-tab:hover { opacity: .9; background: #17171c; }
       .wf-tab-on { opacity: 1; background: #1c1c22; border-color: #2e2e36; }
       .wf-tab-empty { opacity: .35; }
-    .wf-tab.wf-tab-drop { opacity: 1; background: rgba(56,189,248,.18); border-color: #38bdf8; box-shadow: 0 0 0 1px rgba(56,189,248,.45); }
+      .wf-tab.wf-tab-drop { opacity: 1; background: rgba(56,189,248,.18); border-color: #38bdf8; box-shadow: 0 0 0 1px rgba(56,189,248,.45); }
+      .wf-tab.wf-tab-pass { animation: wf-tab-pass .64s ease-out; }
+      @keyframes wf-tab-pass {
+        0% { transform: scale(1.05); background: rgba(56,189,248,.42); border-color: #7dd3fc;
+          box-shadow: 0 0 0 0 rgba(56,189,248,.55), inset 0 0 0 1px rgba(125,211,252,.9); }
+        45% { transform: scale(.99); background: rgba(56,189,248,.2); border-color: #38bdf8;
+          box-shadow: 0 0 0 8px rgba(56,189,248,0), inset 0 0 0 1px rgba(56,189,248,.5); }
+        100% { transform: scale(1); background: transparent; border-color: transparent; box-shadow: none; }
+      }
+      .wf-task.wf-task-flash { animation: wf-task-flash .95s ease-out; }
+      @keyframes wf-task-flash {
+        0% { background: rgba(56,189,248,.26); box-shadow: inset 0 0 0 1px rgba(56,189,248,.75); }
+        100% { background: transparent; box-shadow: inset 0 0 0 1px rgba(56,189,248,0); }
+      }
+      .wf-drag-ghost { transition: transform .18s ease, opacity .18s ease; position: absolute; z-index: 6; display: inline-flex; align-items: center; gap: 7px;
+        max-width: 240px; padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.22);
+        background: #1b1f2a; color: #f4f4f5; font-size: .82em; font-weight: 600;
+        box-shadow: 0 12px 26px -8px rgba(0,0,0,.8); transform: translate(-50%, -50%) rotate(-2deg);
+        pointer-events: none; }
+      .wf-drag-ghost.wf-dropping { transform: translate(-50%, -50%) rotate(-2deg) scale(.18); opacity: 0; }
+      .wf-drag-ghost-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .wf-drag-ghost-dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
+      .wf-move-notice { position: absolute; left: 50%; bottom: 54px; z-index: 7; transform: translateX(-50%);
+        max-width: calc(100% - 32px); padding: 6px 12px; border-radius: 999px; background: rgba(13,16,22,.94);
+        color: #f4f4f5; font-size: .78em; font-weight: 600; border: 1px solid rgba(56,189,248,.45);
+        box-shadow: 0 10px 24px -10px rgba(0,0,0,.8); pointer-events: none;
+        animation: wf-move-notice-in .18s ease-out; }
+      @keyframes wf-move-notice-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+      .wf-theme-light .wf-drag-ghost { background: #ffffff; color: #18181b; border-color: rgba(15,20,30,.2); }
+      .wf-theme-light .wf-move-notice { background: #ffffff; color: #18181b; border-color: rgba(3,105,161,.45); }
+      @media (prefers-reduced-motion: reduce) {
+        .wf-tab.wf-tab-pass, .wf-task.wf-task-flash, .wf-move-notice { animation: none; }
+      }
       .wf-tab-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; opacity: .9; }
+      .wf-drop-slot { display: flex; align-items: center; justify-content: center; height: 40px; margin: 4px 8px; border: 1px dashed #38bdf8; border-radius: 8px; background: rgba(56,189,248,.10); color: #7dd3fc; font-size: .72em; letter-spacing: .04em; animation: wf-slot-pulse 1.2s ease-in-out infinite; }
+      .wf-drop-slot-label { opacity: .9; }
+      @keyframes wf-slot-pulse {
+        0%, 100% { border-color: rgba(56,189,248,.55); background: rgba(56,189,248,.07); }
+        50% { border-color: #38bdf8; background: rgba(56,189,248,.16); }
+      }
+      .wf-theme-light .wf-drop-slot { background: rgba(3,105,161,.08); color: #0369a1; }
+      @media (prefers-reduced-motion: reduce) {
+        .wf-drop-slot { animation: none; }
+        .wf-tab.wf-tab-fresh,
+        .wf-tab.wf-tab-fresh .wf-tab-count { animation: none; }
+      }
       .wf-tab-count { font-size: .86em; opacity: .7; font-variant-numeric: tabular-nums; }
+      .wf-tab.wf-tab-fresh { animation: wf-tab-breathe 1.4s ease-in-out infinite; }
+      .wf-tab.wf-tab-fresh .wf-tab-count {
+        opacity: 1;
+        color: #7dd3fc;
+        font-size: .98em;
+        font-weight: 800;
+        letter-spacing: .02em;
+        background: none;
+        border: 0;
+        text-shadow: 0 0 4px rgba(56,189,248,.85), 0 0 10px rgba(56,189,248,.5);
+        animation: wf-count-glow .4s ease-in-out 5 alternate;
+      }
+      @keyframes wf-tab-breathe {
+        0%, 100% { background-color: rgba(56,189,248,.05); }
+        50% { background-color: rgba(56,189,248,.20); }
+      }
+      @keyframes wf-count-glow {
+        0% { color: #7dd3fc; text-shadow: 0 0 3px rgba(125,211,252,.6), 0 0 8px rgba(56,189,248,.35); }
+        100% { color: #ffffff; text-shadow: 0 0 6px rgba(224,242,254,.95), 0 0 14px rgba(56,189,248,.9), 0 0 26px rgba(56,189,248,.55); }
+      }
       .wf-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
       .wf-tabpanel { display: flex; flex-direction: column; }
       .wf-task-done .wf-task-head { opacity: .55; }
@@ -2068,10 +2303,11 @@ window.__ModuleLoader__.load({
       .wf-task-dragging { opacity: .5; background: rgba(127,127,127,.1); }
       .wf-task-drop-target { box-shadow: inset 0 2px 0 var(--dsw-alias-brand-primary, #7d92ff); }
       .wf-task:last-child { border-bottom: 0; }
-      .wf-task-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px;
-        border: 0; background: #1b1b21; color: #f4f4f5; font: inherit; text-align: left; cursor: pointer;
-        touch-action: none; user-select: none; }
+      .wf-task-head { cursor: grab; display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px;
+        border: 0; background: #1b1b21; color: #f4f4f5; font: inherit; text-align: left; cursor: grab;
+        touch-action: pan-y; user-select: none; }
       .wf-task-head:hover { background: #26262d; }
+      .wf-task-head.wf-task-head-drag { cursor: grabbing; }
       .wf-task-head-drag { opacity: .55; background: rgba(127,127,127,.1); }
       .wf-drag-handle { flex: none; width: 14px; text-align: center; font-size: .9em; opacity: 0; cursor: grab;
         transition: opacity .12s ease; user-select: none; }
@@ -2215,6 +2451,22 @@ window.__ModuleLoader__.load({
       .wf-theme-light .wf-tab-on { background: #ffffff; border-color: #b3bacb; color: #18181b;
         box-shadow: 0 1px 2px rgba(15,20,30,.12); }
       .wf-theme-light .wf-tab-count { color: #5b6478; }
+      .wf-theme-light .wf-tab.wf-tab-fresh { animation-name: wf-tab-breathe-light; }
+      .wf-theme-light .wf-tab.wf-tab-fresh .wf-tab-count {
+        opacity: 1;
+        color: #075985;
+        background: none;
+        text-shadow: 0 0 1px rgba(7,89,133,.95), 0 0 5px rgba(2,132,199,.7), 0 0 14px rgba(3,105,161,.45);
+        animation-name: wf-count-glow-light;
+      }
+      @keyframes wf-count-glow-light {
+        0% { color: #075985; text-shadow: 0 0 3px rgba(3,105,161,.5), 0 0 10px rgba(56,189,248,.35); }
+        100% { color: #0c4a6e; text-shadow: 0 0 7px rgba(2,132,199,.85), 0 0 16px rgba(56,189,248,.65), 0 0 30px rgba(3,105,161,.4); }
+      }
+      @keyframes wf-tab-breathe-light {
+        0%, 100% { transform: scale(1); background-color: rgba(3,105,161,.05); }
+        50% { transform: scale(1.015); background-color: rgba(3,105,161,.14); }
+      }
       .wf-theme-light .wf-menu-preview { color: #6b6b76; }
       .wf-menu { position: fixed; z-index: 2147483100; min-width: 172px; padding: 6px; border-radius: 10px;
         background: #1c1c22; border: 1px solid #2e2e36; box-shadow: 0 16px 40px rgba(0,0,0,.55);

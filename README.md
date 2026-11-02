@@ -65,8 +65,26 @@ Four tabs, in this order: **待验收 / 进行中 / 暂时搁置 / 已验收**.
 - Each tab shows a status dot, its label and the number of tasks inside.
 - Switch categories with the status buttons inside an expanded task
   (完成 / 进行中 / 暂时搁置 / 撤销验收), or drag the row handle `≡` onto another
-  tab: the tab highlights and the task moves to the end of it, then the panel
-  follows the task into that tab.
+  tab: the tab highlights and the task moves to the end of it. The panel stays
+  on the tab you were reading; for two seconds the target tab breathes
+  slightly and its count glows and blinks its halo (both themes)
+  so you can tell new content landed in it.
+- Dragging has motion feedback: the grabbed row dims, a floating copy of its
+  title follows the pointer, the tab or row under the pointer highlights, and
+  after a drop the row flashes, the receiving tab bumps, and a short
+  「已移到「…」」 pill confirms the move.
+- Hovering a tab shrinks the floating copy to 80% of that tab's width and snaps
+  it onto the tab; dropping there plays a short “pass-through” flash on the tab
+  (scale + ring glow) as the task lands inside.
+- Releasing anywhere shrinks the floating copy into the drop point (180 ms)
+  before it disappears, so the drop reads as “put in” rather than “vanish”.
+- With a mouse a row starts dragging on the first movement of its header (touch
+  keeps a 260 ms long-press so the list can still scroll); rows inside one tab
+  reorder freely and the numbers renumber 1..n after every drop.
+- While a row is dragged inside its tab a dashed “放到这里” slot opens at the
+  insertion point and the list makes room for it, so the drop position is
+  visible before releasing; the hit test is geometry based, so releasing in the
+  gap between two rows still lands where the slot shows.
 - Dragging inside the active tab reorders rows; dropping on the active tab
   itself is a no-op. Dropping on **已验收** accepts the task, and dragging a
   task out of 已验收 reopens it.
