@@ -288,6 +288,17 @@ window.__ModuleLoader__.load({
       } catch { return fallback }
     }
 
+    function readString(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key)
+        return raw === null ? fallback : raw
+      } catch { return fallback }
+    }
+
+    function writeString(key, value) {
+      try { localStorage.setItem(key, String(value)) } catch { /* ignore */ }
+    }
+
     function writeFlag(key, value) {
       try { localStorage.setItem(key, value ? '1' : '0') } catch { /* ignore */ }
     }
@@ -1243,13 +1254,13 @@ window.__ModuleLoader__.load({
       const [size, setSize] = useState(readSize)
       const [fontSize, setFontSize] = useState(readFontSize)
       const [activeTab, setActiveTab] = useState(() => {
-        const saved = readFlag(TAB_KEY, 'in_progress')
+        const saved = readString(TAB_KEY, 'in_progress')
         return TABS.some((tab) => tab.key === saved) ? saved : 'in_progress'
       })
 
       const switchTab = (key) => {
         setActiveTab(key)
-        writeFlag(TAB_KEY, key)
+        writeString(TAB_KEY, key)
       }
       const [openId, setOpenId] = useState(null)
       const [draggingId, setDraggingId] = useState(null)

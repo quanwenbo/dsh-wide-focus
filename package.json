@@ -1,6 +1,6 @@
 {
   "name": "dsh-wide-focus",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "DSH 桌面客户端的宽屏阅读模式、可拖动悬浮任务面板，以及上下文管家（占用 / 缓存 / 连贯性 + 交接建议）",
   "license": "MIT",
   "author": "BOB",

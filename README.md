@@ -14,7 +14,7 @@
 
 ```powershell
 # 1) 从 GitHub（公开仓库，固定 tag）
-dsh plugin --profile desktop add git+https://github.com/quanwenbo/dsh-wide-focus.git#v0.12.1
+dsh plugin --profile desktop add git+https://github.com/quanwenbo/dsh-wide-focus.git#v0.12.2
 
 # 2) 从本地目录（开发时）
 dsh plugin --profile desktop add C:\Users\BOB\dsh-plugins\wide-focus
@@ -97,8 +97,16 @@ dsh plugin --profile desktop add C:\Users\BOB\dsh-plugins\wide-focus
   圆角透明；圆盘由亮面、暗半和两个反向「种子」组成。点击在深/浅之间切换，
   圆盘旋转 180° 作为反馈，选择记在 `dsh.wide-focus.panelTheme`。
 - 深色：外壳 `#17171b` → 标题带 `#0b0b0e` → 正文 `#1c2f4f`；
-  浅色：外壳 `#ffffff` → 标题带 `#18181b` → 正文 `#2563eb`。
+  浅色：外壳与标题带为浅灰白、任务行白底深字、分隔线更淡，强调色仍是那四个状态色。
 - 状态色：暂时搁置 `#9a9aa5`、进行中 `#60a5fa`、待验收 `#fbbf24`、已验收 `#6b7280`。
+
+浅色面板（只截面板本身，示例数据）：
+
+![浅色面板：待验收标签](docs/screenshots/panel-light-review@2x.png)
+
+![浅色面板：进行中标签](docs/screenshots/panel-light-wide@2x.png)
+
+![浅色面板：340px 窄宽度](docs/screenshots/panel-light-narrow@2x.png)
 
 ## 窄宽度响应式
 

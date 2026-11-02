@@ -72,9 +72,14 @@ Object.defineProperty(globalThis, 'navigator', { value: { language: 'zh-CN' }, c
 
 // Start from a roomy panel so the screenshot shows the full tab labels.
 const SHOT = process.env.SHOT || 'overview'
-const PANEL_W = SHOT === 'narrow' ? 340 : 470
+const BARE = SHOT.startsWith('panel')
+const PANEL_W = SHOT === 'narrow' || SHOT === 'panel-narrow' ? 340 : 470
 const PANEL_H = 470
 store.set('dsh.wide-focus.panelSize', JSON.stringify({ width: PANEL_W, height: PANEL_H }))
+if (BARE) {
+  store.set('dsh.wide-focus.panelTheme', 'light')
+  store.set('dsh.wide-focus.activeTab', SHOT === 'panel-review' ? 'in_review' : 'in_progress')
+}
 
 // Mock tasks: a plausible slice of the Bobstar short-drama workboard.
 const now = Date.now()
@@ -457,18 +462,53 @@ const page = ({ width, height, withCard, label }) => `<!doctype html>
 </body>
 </html>`
 
+const barePage = () => `<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; width: ${PANEL_W + 48}px; height: ${PANEL_H + 48}px;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(600px 300px at 20% 0%, rgba(56,189,248,.10), transparent 70%),
+      radial-gradient(600px 300px at 100% 100%, rgba(124,108,255,.10), transparent 70%),
+      #e9edf4;
+    font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  }
+  .demo-panel { position: relative; }
+  .demo-panel .wf-panel {
+    position: relative !important; left: auto !important; top: auto !important;
+    right: auto !important; bottom: auto !important;
+    width: ${PANEL_W}px !important; height: ${PANEL_H}px !important;
+  }
+  ${styles}
+</style>
+</head>
+<body>
+  <div class="demo-panel">${panelHtml}</div>
+</body>
+</html>`
+
 const outDir = path.resolve('docs/screenshots')
 fs.mkdirSync(outDir, { recursive: true })
 
-const shots = SHOT === 'narrow'
-  ? [{ file: 'narrow.png', width: 1680, height: 1000, withCard: false, label: '窄宽度（340px）：单字标签 + 计数，工具条自动收紧（示例数据）' }]
-  : [
-      { file: 'overview.png', width: 1680, height: 1000, withCard: false, label: '宽屏模式 + 悬浮任务面板（示例数据）' },
-      { file: 'context-card.png', width: 1680, height: 1000, withCard: true, label: '上下文管家：占用、缓存、连贯性与继续/新开建议（示例数据）' },
-    ]
-
-for (const shot of shots) {
-  const file = path.join(outDir, shot.file.replace(/\.png$/, '.html'))
-  fs.writeFileSync(file, page(shot))
+if (BARE) {
+  const file = path.join(outDir, `${SHOT}.html`)
+  fs.writeFileSync(file, barePage())
   console.log('wrote', file)
+} else {
+  const shots = SHOT === 'narrow'
+    ? [{ file: 'narrow.png', width: 1680, height: 1000, withCard: false, label: '窄宽度（340px）：单字标签 + 计数，工具条自动收紧（示例数据）' }]
+    : [
+        { file: 'overview.png', width: 1680, height: 1000, withCard: false, label: '宽屏模式 + 悬浮任务面板（示例数据）' },
+        { file: 'context-card.png', width: 1680, height: 1000, withCard: true, label: '上下文管家：占用、缓存、连贯性与继续/新开建议（示例数据）' },
+      ]
+
+  for (const shot of shots) {
+    const file = path.join(outDir, shot.file.replace(/\.png$/, '.html'))
+    fs.writeFileSync(file, page(shot))
+    console.log('wrote', file)
+  }
 }
