@@ -578,7 +578,6 @@ window.__ModuleLoader__.load({
     }
 
     function moveTaskTo(targetStatus, draggedId, targetId, placeAfter) {
-      if (targetStatus === 'done') return
       const next = moveTaskInList(readLocalTasks(), targetStatus, draggedId, targetId, placeAfter)
       commitLocal(next)
     }
@@ -1243,6 +1242,8 @@ window.__ModuleLoader__.load({
       const [openId, setOpenId] = useState(null)
       const [draggingId, setDraggingId] = useState(null)
       const [hoverId, setHoverId] = useState(null)
+      const [dropTab, setDropTab] = useState(null)
+      const activeTabRef = useRef(activeTab)
       const [confirmId, setConfirmId] = useState(null)
       const [draft, setDraft] = useState(null)
       const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }))
@@ -1283,6 +1284,8 @@ window.__ModuleLoader__.load({
       const dragEndAtRef = useRef(0)
       const confirmTimer = useRef(null)
       const bodyRef = useRef(null)
+
+      activeTabRef.current = activeTab
 
       const columns = TABS.map((tab) => ({ ...tab, tasks: readOrderedColumn(tasks, tab.key) }))
       const total = tasks.length
@@ -1533,13 +1536,31 @@ window.__ModuleLoader__.load({
           const dy = Math.abs(event.clientY - drag.startY)
           if (!drag.moved && dx + dy < 4) return
           drag.moved = true
+          let element = null
           let row = null
           let header = null
+          let tabKey = null
           try {
-            const element = document.elementFromPoint(event.clientX, event.clientY)
-            row = element && element.closest ? element.closest('[data-task-id]') : null
-            header = !row && element && element.closest ? element.closest('[data-drop-status]') : null
-          } catch { row = null; header = null }
+            element = document.elementFromPoint(event.clientX, event.clientY)
+            const tabEl = element && element.closest ? element.closest('[data-tab]') : null
+            if (tabEl) tabKey = tabEl.getAttribute('data-tab')
+            row = tabKey === null && element && element.closest ? element.closest('[data-task-id]') : null
+            header = tabKey === null && !row && element && element.closest ? element.closest('[data-drop-status]') : null
+          } catch { row = null; header = null; tabKey = null }
+          if (tabKey !== null) {
+            if (tabKey === activeTabRef.current) {
+              if (drag.target !== null && drag.target.tab) { drag.target = null; setDropTab(null) }
+              setHoverId(null)
+              return
+            }
+            if (drag.target === null || drag.target.tab !== tabKey) {
+              drag.target = { tab: tabKey }
+              setDropTab(tabKey)
+              setHoverId(null)
+            }
+            return
+          }
+          setDropTab(null)
           if (header !== null) {
             const target = { id: null, after: true, status: header.getAttribute('data-drop-status') }
             if (drag.target === null || drag.target.status !== target.status || drag.target.id !== null) {
@@ -1568,10 +1589,17 @@ window.__ModuleLoader__.load({
           dragRef.current = null
           setDraggingId(null)
           setHoverId(null)
+          setDropTab(null)
           if (!drag.moved) return
           if (drag.target !== null) {
             try {
-              moveTaskTo(activeTab, drag.id, drag.target.id, drag.target.after)
+              if (drag.target.tab) {
+                moveTaskTo(drag.target.tab, drag.id, null, false)
+                switchTab(drag.target.tab)
+                setOpenId(drag.id)
+              } else {
+                moveTaskTo(activeTabRef.current, drag.id, drag.target.id, drag.target.after)
+              }
             } catch (error) {
               try { console.error('[wide-focus] move failed', error) } catch { /* ignore */ }
             }
@@ -1586,6 +1614,7 @@ window.__ModuleLoader__.load({
           dragRef.current = null
           setDraggingId(null)
           setHoverId(null)
+          setDropTab(null)
         }
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
@@ -1786,6 +1815,7 @@ window.__ModuleLoader__.load({
           className: [
             'wf-tab',
             activeTab === column.key ? 'wf-tab-on' : '',
+            dropTab === column.key ? 'wf-tab-drop' : '',
             column.tasks.length === 0 ? 'wf-tab-empty' : '',
           ].filter(Boolean).join(' '),
           onClick: () => switchTab(column.key),
@@ -2026,6 +2056,7 @@ window.__ModuleLoader__.load({
       .wf-tab:hover { opacity: .9; background: #17171c; }
       .wf-tab-on { opacity: 1; background: #1c1c22; border-color: #2e2e36; }
       .wf-tab-empty { opacity: .35; }
+    .wf-tab.wf-tab-drop { opacity: 1; background: rgba(56,189,248,.18); border-color: #38bdf8; box-shadow: 0 0 0 1px rgba(56,189,248,.45); }
       .wf-tab-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; opacity: .9; }
       .wf-tab-count { font-size: .86em; opacity: .7; font-variant-numeric: tabular-nums; }
       .wf-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

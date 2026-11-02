@@ -64,8 +64,12 @@ Four tabs, in this order: **待验收 / 进行中 / 暂时搁置 / 已验收**.
   does not scroll with it.
 - Each tab shows a status dot, its label and the number of tasks inside.
 - Switch categories with the status buttons inside an expanded task
-  (完成 / 进行中 / 暂时搁置 / 撤销验收); dragging only reorders inside the
-  active tab.
+  (完成 / 进行中 / 暂时搁置 / 撤销验收), or drag the row handle `≡` onto another
+  tab: the tab highlights and the task moves to the end of it, then the panel
+  follows the task into that tab.
+- Dragging inside the active tab reorders rows; dropping on the active tab
+  itself is a no-op. Dropping on **已验收** accepts the task, and dragging a
+  task out of 已验收 reopens it.
 - The active tab persists in `dsh.wide-focus.activeTab`.
 - An empty tab says “这个分类暂时没有任务。” — the strip never collapses on
   its own.
