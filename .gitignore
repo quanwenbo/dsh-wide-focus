@@ -1,0 +1,6 @@
+node_modules/
+shots/
+_preview/
+_scratch/
+*.tmp
+*.log

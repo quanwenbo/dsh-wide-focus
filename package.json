@@ -1,0 +1,55 @@
+{
+  "name": "dsh-wide-focus",
+  "version": "0.11.3",
+  "description": "DSH Web 客户端的宽读模式与可拖动悬浮任务面板（四标签、快捷键、本机持久化）",
+  "license": "MIT",
+  "author": "BOB",
+  "repository": {
+    "type": "git",
+    "url": "git+https://atomgit.com/17725785770/dsh-wide-focus.git"
+  },
+  "homepage": "https://atomgit.com/17725785770/dsh-wide-focus",
+  "bugs": {
+    "url": "https://atomgit.com/17725785770/dsh-wide-focus/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "wide-mode",
+    "task-panel"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
