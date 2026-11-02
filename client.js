@@ -2585,6 +2585,817 @@ window.__ModuleLoader__.load({
       .wf-modal-primary:hover { background: #ececec; }
     `
 
+
+    // ---- context guard (merged from @local/context-guard) -----------------------
+    const __contextGuard = (() => {
+    const React = require('react')
+    const h = React.createElement
+    const { useState, useEffect, useRef, useSyncExternalStore } = React
+
+    const WARN = 0.6
+    const MID = 0.7
+    const HIGH = 0.8
+    const SWITCH = 0.85
+    const REFRESH_MS = 20000
+
+    const TEXT = {
+      zh: {
+        badgeTitle: '上下文管家：查看占用、连贯性与交接',
+        cardTitle: '上下文健康度',
+        refresh: '刷新',
+        close: '关闭',
+        loading: '读取中…',
+        offline: '宿主路由未就绪：重启一次桌面客户端后生效。',
+        unavailable: '会话不在当前进程内（可能来自别的窗口）。',
+        noSession: '等待会话…',
+        statusHealthy: '宽裕',
+        statusTight: '偏紧',
+        statusHigh: '偏高',
+        statusCritical: '临界',
+        adviceKeep: '上下文还很宽裕，继续本会话即可。',
+        adviceTight: '还能继续，但建议找机会压缩一次，避免清空重来。',
+        adviceMigrate: '建议交接后新开会话，别让下一轮重发整段历史。',
+        adviceCritical: '上下文接近耗尽，请立刻交接并新开会话。',
+        tokens: 'Token 占用',
+        cache: '缓存命中',
+        turns: '轮次',
+        coherence: '任务连贯性',
+        coherenceHigh: '高',
+        coherenceMid: '中',
+        coherenceLow: '低',
+        coherenceHighHint: '多轮工具调用与文件改动交织，任务强连贯，换会话会丢上下文。',
+        coherenceMidHint: '已有若干轮推进，仍可继续；交接时把关键决策写清楚。',
+        coherenceLowHint: '对话还短或偏讨论，换会话成本低。',
+        decideTitle: '决策方向',
+        keepTitle: '这些情况下不切换',
+        keepWhen: [
+          '同一目标、同一处代码还在改，切换要重建现场。',
+          '下一步要用到刚讨论过的细节，重新交代比继续更贵。',
+          '验证还没收尾，结论还没落到代码或文档里。',
+        ],
+        newTitle: '这些情况下建议换',
+        newWhen: [
+          '任务已经收口，接着要开的是另一个主题。',
+          '前面几轮主要是探索，结论已经写下来、不再依赖过程。',
+          '同一个问题反复返工，越修越乱，说明上下文在干扰判断。',
+        ],
+        recKeep: '建议继续：占用还低，且任务强连贯，留在本会话最省信息。',
+        recAfterCompress: '建议继续：刚压缩过，当前是「轻量连贯」状态，正好接着推进。',
+        recEither: '两边都行：接近中段，建议先压缩一次，再决定是否换。',
+        recNew: '建议新开：占用已高，先做交接再重开，比强行续命更稳。',
+        migrateNow: '生成交接文档并新开会话',
+        working: '正在生成交接文档…',
+        handoffFail: '生成失败',
+        copied: '已复制',
+        handoffDone: '交接文档已写入',
+        startNote: '新会话里说「读这个文件继续」即可；路径已复制。',
+        estNote: '该会话暂无真实 usage，数字来自 DSH tokenMeter 的估算。',
+        error: '读取失败',
+      },
+      en: {
+        badgeTitle: 'Context guard: pressure, coherence and handoff',
+        cardTitle: 'Context health',
+        refresh: 'Refresh',
+        close: 'Close',
+        loading: 'Loading…',
+        offline: 'Host routes are not loaded yet — restart the desktop client once.',
+        unavailable: 'Session is not live in this process.',
+        noSession: 'Waiting for a session…',
+        statusHealthy: 'Plenty',
+        statusTight: 'Tight',
+        statusHigh: 'High',
+        statusCritical: 'Critical',
+        adviceKeep: 'There is plenty of room; keep this session going.',
+        adviceTight: 'Still fine, but take the next chance to compact once.',
+        adviceMigrate: 'Hand off and start a new session before the next turn resends everything.',
+        adviceCritical: 'Almost exhausted — hand off and start a new session now.',
+        tokens: 'Token usage',
+        cache: 'Cache hit',
+        turns: 'Turns',
+        coherence: 'Task coherence',
+        coherenceHigh: 'High',
+        coherenceMid: 'Medium',
+        coherenceLow: 'Low',
+        coherenceHighHint: 'Many tool calls and file edits build on each other; a fresh session would lose that.',
+        coherenceMidHint: 'Several rounds in; you can continue, but write the key decisions into the handoff.',
+        coherenceLowHint: 'The conversation is still short or mostly discussion; switching is cheap.',
+        decideTitle: 'Decision direction',
+        keepTitle: 'Do not switch when',
+        keepWhen: [
+          'The same goal or the same code path is still being changed; switching means rebuilding the scene.',
+          'The next step needs details discussed just now; re-explaining costs more than continuing.',
+          'Verification is still open, and the outcome is not in code or docs yet.',
+        ],
+        newTitle: 'Switch when',
+        newWhen: [
+          'The task is closed and the next thing is a different topic.',
+          'Earlier turns were mostly exploration whose conclusions are already written down.',
+          'The same problem is being reworked in circles; the context is now part of the noise.',
+        ],
+        recKeep: 'Keep going: context is still light and the task is tightly coupled.',
+        recAfterCompress: 'Keep going: a fresh compression made this light but coherent; continue here.',
+        recEither: 'Either works: near the middle; compact once, then decide whether to switch.',
+        recNew: 'Start a new session: occupancy is high; hand off first instead of stretching this one.',
+        migrateNow: 'Build handoff and start a new session',
+        working: 'Building the handoff…',
+        handoffFail: 'Failed to build the handoff',
+        copied: 'Copied',
+        handoffDone: 'Handoff written',
+        startNote: 'In the new session say "read this file and continue". Path copied.',
+        estNote: 'No real usage yet; numbers come from the DSH tokenMeter estimate.',
+        error: 'Read failed',
+      },
+    }
+
+    function detectLanguage() {
+      const raw = (typeof navigator !== 'undefined' && navigator.language) || 'zh'
+      return String(raw).toLowerCase().startsWith('en') ? 'en' : 'zh'
+    }
+    let language = detectLanguage()
+    function useLang() {
+      return language
+    }
+
+    function t(lang, key) {
+      const dict = TEXT[lang] || TEXT.zh
+      return dict[key] || TEXT.zh[key] || key
+    }
+
+    // ---- shared state -----------------------------------------------------
+    let state = { status: 'idle', sessionId: null, data: null, error: null }
+    let simulated = null
+    const stateListeners = new Set()
+    function setState(patch) {
+      state = { ...state, ...patch }
+      for (const listener of stateListeners) listener()
+    }
+    function useStore(selector) {
+      return useSyncExternalStore(
+        (listener) => { stateListeners.add(listener); return () => stateListeners.delete(listener) },
+        () => selector(state),
+      )
+    }
+
+    // ---- card open state --------------------------------------------------
+    let openState = false
+    const openListeners = new Set()
+    function setOpen(next) {
+      const value = Boolean(next)
+      if (value === openState) return
+      openState = value
+      for (const listener of openListeners) listener()
+    }
+    function useOpen() {
+      return useSyncExternalStore(
+        (listener) => { openListeners.add(listener); return () => openListeners.delete(listener) },
+        () => openState,
+      )
+    }
+
+    let toast = { text: '', at: 0 }
+    const toastListeners = new Set()
+    function showToast(text) {
+      toast = { text, at: Date.now() }
+      for (const listener of toastListeners) listener()
+      setTimeout(() => { if (Date.now() - toast.at >= 1800) { toast = { text: '', at: 0 }; for (const listener of toastListeners) listener() } }, 2000)
+    }
+    function useToast() {
+      return useSyncExternalStore(
+        (listener) => { toastListeners.add(listener); return () => toastListeners.delete(listener) },
+        () => toast.text,
+      )
+    }
+
+    async function fetchJson(path, init) {
+      const response = await fetch(path, { cache: 'no-store', ...init })
+      let payload = null
+      try { payload = await response.json() } catch { payload = null }
+      if (!response.ok || !payload || payload.ok !== true) {
+        const message = payload && payload.error ? payload.error.message : `HTTP ${response.status}`
+        const code = payload && payload.error ? payload.error.code : 'http_error'
+        const error = new Error(message)
+        error.code = code
+        throw error
+      }
+      return payload.value
+    }
+
+    let refreshTimer = null
+    async function refresh(sessionId) {
+      const target = sessionId || state.sessionId
+      if (!target) return
+      if (simulated) {
+        setState({ status: 'ready', sessionId: target, data: simulated, error: null })
+        notifyThreshold(simulated)
+        return
+      }
+      try {
+        const value = await fetchJson(`/context-guard/state?sessionId=${encodeURIComponent(target)}`)
+        setState({ status: 'ready', sessionId: target, data: value, error: null })
+        notifyThreshold(value)
+      } catch (error) {
+        const code = error && error.code ? error.code : 'http_error'
+        const message = error instanceof Error ? error.message : String(error)
+        const missingRoute = code === 'http_error' && /404|not found/i.test(message)
+        setState({
+          status: missingRoute ? 'offline' : code === 'session_not_live' ? 'offline-session' : 'error',
+          sessionId: target,
+          error: message,
+        })
+      }
+    }
+
+    const autoOpenedSessions = new Set()
+    function autoOpenOnce(session) {
+      if (!session || autoOpenedSessions.has(session)) return
+      try {
+        if (localStorage.getItem(`dsh.context-guard.autoOpened:${session}`) === '1') {
+          autoOpenedSessions.add(session)
+          return
+        }
+      } catch { /* ignore */ }
+      autoOpenedSessions.add(session)
+      try { localStorage.setItem(`dsh.context-guard.autoOpened:${session}`, '1') } catch { /* ignore */ }
+      setOpen(true)
+    }
+
+    function notifyThreshold(value) {
+      if (!value || !value.session) return
+      const ratio = Number(value.ratio) || 0
+      const key = `dsh.context-guard.notified:${value.session}`
+      let notified = 0
+      try { notified = Number(localStorage.getItem(key) || 0) } catch { notified = 0 }
+      const level = ratio >= SWITCH ? 85 : ratio >= HIGH ? 80 : ratio >= MID ? 70 : ratio >= WARN ? 60 : 0
+      if (level > notified) {
+        try { localStorage.setItem(key, String(level)) } catch { /* ignore */ }
+        if (level >= 70) {
+          const text = level >= 85
+            ? `上下文 ${(ratio * 100).toFixed(0)}%：红色警报，立刻生成交接并开新会话`
+            : level >= 80
+              ? `上下文 ${(ratio * 100).toFixed(0)}%：建议开新会话并迁移摘要`
+              : `上下文 ${(ratio * 100).toFixed(0)}%：可再次压缩或继续`
+          if (!openState) showToast(text)
+          if (level >= 80) autoOpenOnce(value.session)
+        }
+      }
+    }
+
+    // dev-only: simulate a context ratio without waiting for a real session
+    function simulate(input) {
+      if (input === null || input === undefined) {
+        simulated = null
+        setState({ status: 'idle', data: null, error: null })
+        return null
+      }
+      const ratio = Math.max(0, Math.min(1, Number(typeof input === 'number' ? input : input.ratio) || 0))
+      const window = 128000
+      const promptTokens = Math.round(window * ratio)
+      const session = currentSessionId || state.sessionId || 'simulated'
+      simulated = {
+        session,
+        model: 'deepseek-flash',
+        provider: 'deepseek-account',
+        contextWindow: window,
+        promptTokens,
+        ratio,
+        estimated: true,
+        cacheReadTokens: Math.round(promptTokens * 0.55),
+        cacheWriteTokens: 0,
+        cacheHitRate: 0.55,
+        turns: 9,
+        toolCalls: 7,
+        files: ['client.js', 'index.js'],
+        looksLikeDiscussion: false,
+        thresholds: { warn: WARN, mid: MID, high: HIGH, switch: SWITCH },
+      }
+      try { localStorage.removeItem(`dsh.context-guard.notified:${session}`) } catch { /* ignore */ }
+      setState({ status: 'ready', sessionId: session, data: simulated, error: null })
+      notifyThreshold(simulated)
+      return simulated
+    }
+
+    function usePolling(sessionId) {
+      useEffect(() => {
+        if (!sessionId) return undefined
+        refresh(sessionId)
+        const timer = setInterval(() => refresh(sessionId), REFRESH_MS)
+        refreshTimer = timer
+        return () => { clearInterval(timer); refreshTimer = null }
+      }, [sessionId])
+    }
+
+    const asList = (value) => (Array.isArray(value) ? value : [value])
+
+    function percent(ratio) {
+      const value = Number(ratio) || 0
+      return `${Math.max(0, Math.min(999, value * 100)).toFixed(0)}%`
+    }
+    function tone(ratio) {
+      if (ratio >= SWITCH) return 'alarm'
+      if (ratio >= HIGH) return 'danger'
+      if (ratio >= MID) return 'hot'
+      if (ratio >= WARN) return 'warn'
+      return 'ok'
+    }
+    const TONE_COLOR = { ok: '#34d399', warn: '#fbbf24', hot: '#fb923c', danger: '#ef4444', alarm: '#ff2d55' }
+
+    function compactTokens(value) {
+      const n = Number(value) || 0
+      if (n >= 1000000) return `${(n / 1000000).toFixed(2)}M`
+      if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+      return String(Math.round(n))
+    }
+
+    // ---- current session id (published by an invisible header slot) ----
+    let currentSessionId = ''
+    const currentSessionListeners = new Set()
+    function setCurrentSession(id) {
+      const next = String(id || '')
+      if (next === currentSessionId) return
+      currentSessionId = next
+      for (const listener of currentSessionListeners) listener()
+    }
+    function useCurrentSession() {
+      return useSyncExternalStore(
+        (listener) => { currentSessionListeners.add(listener); return () => currentSessionListeners.delete(listener) },
+        () => currentSessionId,
+      )
+    }
+    function SessionRecorder({ sessionId }) {
+      useEffect(() => { if (sessionId) setCurrentSession(sessionId) }, [sessionId])
+      return null
+    }
+
+    // ---- handoff + clipboard ---------------------------------------------
+    async function buildHandoff(sessionId) {
+      return fetchJson('/context-guard/handoff', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+    }
+
+    async function copyText(text) {
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text)
+          return true
+        }
+      } catch { /* fall through */ }
+      try {
+        const area = document.createElement('textarea')
+        area.value = text
+        area.setAttribute('readonly', '')
+        area.style.position = 'fixed'
+        area.style.opacity = '0'
+        document.body.appendChild(area)
+        area.select()
+        document.execCommand('copy')
+        area.remove()
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    let uiWorkspaceService = null
+
+    // ---- task-panel chip / header badge ----------------------------------
+    function Chip() {
+      const lang = useLang()
+      const sessionId = useCurrentSession()
+      const open = useOpen()
+      const ratio = useStore((s) => (s.data ? s.data.ratio : 0))
+      const status = useStore((s) => s.status)
+      const estimated = useStore((s) => Boolean(s.data && s.data.estimated))
+      const error = useStore((s) => s.error)
+      const sameSession = useStore((s) => String(s.sessionId || '') === String(currentSessionId || ''))
+      usePolling(sessionId || null)
+      const ready = status === 'ready' && sameSession
+      const level = tone(ratio)
+      const color = ready ? TONE_COLOR[level] : 'var(--dsw-alias-label-secondary, #8b8b96)'
+      const label = ready ? `${estimated ? '≈' : ''}${percent(ratio)}` : status === 'loading' ? '…' : sameSession ? '—' : '…'
+      return h('button', {
+        type: 'button',
+        className: `cg-chip${ready && level === 'alarm' ? ' cg-alarm' : ''}`,
+        title: status === 'error' && error ? t(lang, 'badgeTitle') + ' · ' + error : t(lang, 'badgeTitle'),
+        'aria-expanded': open,
+        style: { color, borderColor: ready ? color : undefined },
+        onClick: () => setOpen(!openState),
+      }, h('span', { className: 'cg-chip-dot', style: { background: color } }), label)
+    }
+
+    function Badge({ sessionId }) {
+      const lang = useLang()
+      const open = useOpen()
+      const ratio = useStore((s) => (s.data ? s.data.ratio : 0))
+      const status = useStore((s) => s.status)
+      const sameSession = useStore((s) => String(s.sessionId || '') === String(sessionId || ''))
+      useEffect(() => { if (sessionId) setState({ sessionId: String(sessionId) }) }, [sessionId])
+      usePolling(sessionId ? String(sessionId) : null)
+      const ready = status === 'ready' && sameSession
+      const color = ready ? TONE_COLOR[tone(ratio)] : 'var(--dsw-alias-label-secondary, #8b8b96)'
+      const label = ready ? percent(ratio) : status === 'loading' ? '…' : sameSession ? '—' : '…'
+      return h('button', {
+        type: 'button',
+        className: `cg-badge${ready && tone(ratio) === 'alarm' ? ' cg-alarm' : ''}`,
+        title: t(lang, 'badgeTitle'),
+        'aria-expanded': open,
+        style: { borderColor: ready ? color : undefined, color: ready ? color : undefined },
+        onClick: () => setOpen(!openState),
+      }, h('span', { className: 'cg-badge-dot', style: { background: color } }), label)
+    }
+
+    // ---- the context card ------------------------------------------------
+    function Card() {
+      const lang = useLang()
+      const open = useOpen()
+      const data = useStore((s) => s.data)
+      const status = useStore((s) => s.status)
+      const error = useStore((s) => s.error)
+      const sessionId = useStore((s) => s.sessionId) || currentSessionId
+      const toastText = useToast()
+      const cardRef = useRef(null)
+      const [anchor, setAnchor] = useState(null)
+      const [busy, setBusy] = useState(false)
+      const [handoff, setHandoff] = useState(null)
+      const [previousRatio] = useState(() => {
+        try { return Number(localStorage.getItem(`dsh.context-guard.last:${currentSessionId}`) || 0) } catch { return 0 }
+      })
+
+      const ratio = data ? Number(data.ratio) || 0 : 0
+      const used = Math.round(Math.max(0, Math.min(1, ratio)) * 100)
+      const overflow = Boolean(data && (data.overflow || Number(data.rawRatio) > 1.02))
+      const toneName = tone(ratio)
+      const promptTokens = data ? Number(data.promptTokens) || 0 : 0
+      const contextWindow = data ? Number(data.contextWindow) || 0 : 0
+      const cacheHitRate = data ? Number(data.cacheHitRate) || 0 : 0
+      const turns = data ? Number(data.turns) || 0 : 0
+      const toolCalls = data ? Number(data.toolCalls) || 0 : 0
+      const fileCount = data && Array.isArray(data.files) ? data.files.length : 0
+      const looksLikeDiscussion = Boolean(data && data.looksLikeDiscussion)
+
+      const statusKey = ratio >= SWITCH ? 'statusCritical' : ratio >= HIGH ? 'statusHigh' : ratio >= WARN ? 'statusTight' : 'statusHealthy'
+      const adviceKey = ratio >= SWITCH ? 'adviceCritical' : ratio >= HIGH ? 'adviceMigrate' : ratio >= WARN ? 'adviceTight' : 'adviceKeep'
+
+      const coherence = turns >= 8 && (toolCalls >= 5 || fileCount >= 2) ? 'high' : turns >= 3 ? 'mid' : 'low'
+      const coherenceKey = coherence === 'high' ? 'coherenceHigh' : coherence === 'mid' ? 'coherenceMid' : 'coherenceLow'
+      const coherenceColor = coherence === 'high' ? '#34d399' : coherence === 'mid' ? '#fbbf24' : '#8b8b96'
+
+      const compressedRecently = previousRatio > 0 && ratio > 0 && ratio < previousRatio * 0.75
+      const recommend = ratio >= SWITCH
+        ? 'new'
+        : compressedRecently
+          ? 'keep'
+          : ratio >= HIGH
+            ? (looksLikeDiscussion ? 'new' : 'either')
+            : 'keep'
+      const recommendTextKey = recommend === 'new'
+        ? 'recNew'
+        : compressedRecently
+          ? 'recAfterCompress'
+          : recommend === 'either'
+            ? 'recEither'
+            : 'recKeep'
+
+      useEffect(() => {
+        if (!open) return undefined
+        refresh(sessionId)
+        return undefined
+      }, [open, sessionId])
+
+      useEffect(() => {
+        try {
+          if (sessionId) localStorage.setItem(`dsh.context-guard.last:${sessionId}`, String(ratio))
+        } catch { /* ignore */ }
+      }, [ratio, sessionId])
+
+      useEffect(() => {
+        if (!open) return undefined
+        const place = () => {
+          try {
+            const panel = document.querySelector('.wf-panel') || document.querySelector('.wf-pill')
+            if (panel) panel.classList.add('cg-panel-blurred')
+            const card = cardRef.current
+            if (!card) return
+            if (!panel) { setAnchor(null); return }
+            const rect = panel.getBoundingClientRect()
+            const width = card.offsetWidth || 420
+            const height = card.offsetHeight || 520
+            const centerX = rect.left + rect.width / 2
+            const centerY = rect.top + rect.height / 2
+            const next = {
+              left: Math.max(8, Math.min(Math.max(8, window.innerWidth - width - 8), centerX - width / 2)),
+              top: Math.max(8, Math.min(Math.max(8, window.innerHeight - height - 8), centerY - height / 2)),
+            }
+            setAnchor((current) => (
+              current && Math.abs(current.left - next.left) < 1 && Math.abs(current.top - next.top) < 1 ? current : next
+            ))
+          } catch { /* keep the default CSS position */ }
+        }
+        place()
+        const veilTimer = setInterval(() => {
+          try {
+            const panel = document.querySelector('.wf-panel') || document.querySelector('.wf-pill')
+            if (panel) panel.classList.add('cg-panel-blurred')
+          } catch { /* ignore */ }
+        }, 120)
+        const timer = setInterval(place, 400)
+        window.addEventListener('resize', place)
+        return () => {
+          clearInterval(veilTimer)
+          clearInterval(timer)
+          window.removeEventListener('resize', place)
+          const panel = document.querySelector('.wf-panel, .wf-pill')
+          if (panel) panel.classList.remove('cg-panel-blurred')
+        }
+      }, [open])
+
+      useEffect(() => {
+        if (!open) return undefined
+        const onKey = (event) => { if (event.key === 'Escape') setOpen(false) }
+        const onDown = (event) => {
+          const card = cardRef.current
+          if (card && !card.contains(event.target)) setOpen(false)
+        }
+        window.addEventListener('keydown', onKey)
+        document.addEventListener('pointerdown', onDown, true)
+        return () => {
+          window.removeEventListener('keydown', onKey)
+          document.removeEventListener('pointerdown', onDown, true)
+        }
+      }, [open])
+
+      async function doMigrate() {
+        if (busy || !sessionId) return
+        setBusy(true)
+        try {
+          const result = await buildHandoff(String(sessionId))
+          setHandoff(result || null)
+          if (result && result.path) await copyText(result.path)
+          if (result && result.markdown) await copyText(result.markdown)
+          showToast(t(lang, 'handoffDone') + (result && result.path ? '：' + result.path : ''))
+          if (uiWorkspaceService && typeof uiWorkspaceService.startSession === 'function') {
+            uiWorkspaceService.startSession()
+          }
+        } catch (err) {
+          showToast(`${t(lang, 'handoffFail')}：${err && err.message ? err.message : String(err)}`)
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      if (!open) return null
+
+      const headline = status === 'offline'
+        ? t(lang, 'offline')
+        : status === 'offline-session'
+          ? t(lang, 'unavailable')
+          : status === 'error'
+            ? `${t(lang, 'error')}${error ? '：' + error : ''}`
+            : !sessionId
+              ? t(lang, 'noSession')
+              : null
+
+      const statRow = (label, value) => h('div', { className: 'cg-stat' },
+        h('span', { className: 'cg-stat-label' }, label),
+        h('span', { className: 'cg-stat-value' }, value),
+      )
+
+      return h('div', { className: 'cg-mask', style: { pointerEvents: 'none' } },
+        h('section', {
+          className: 'cg-card',
+          ref: cardRef,
+          style: anchor ? { left: anchor.left, top: anchor.top, right: 'auto' } : undefined,
+          'aria-label': t(lang, 'cardTitle'),
+        },
+        h('header', { className: 'cg-head' },
+          h('span', { className: 'cg-title' }, t(lang, 'cardTitle')),
+          h('button', { type: 'button', className: 'cg-icon', title: t(lang, 'refresh'), onClick: () => refresh(sessionId) }, '↻'),
+          h('button', { type: 'button', className: 'cg-icon', title: t(lang, 'close'), onClick: () => setOpen(false) }, '✕'),
+        ),
+        headline ? h('p', { className: 'cg-note' }, headline) : null,
+        h('div', { className: 'cg-health' },
+          h('div', { className: 'cg-health-num', style: { color: TONE_COLOR[toneName] } },
+            status === 'ready' ? (overflow ? '>100%' : `${used}%`) : '—'),
+          h('div', { className: 'cg-health-meta' },
+            h('span', { className: 'cg-health-status', style: { color: TONE_COLOR[toneName] } }, t(lang, statusKey)),
+            h('span', { className: 'cg-health-cap' }, `${compactTokens(promptTokens)} / ${compactTokens(contextWindow)}`),
+          ),
+        ),
+        h('div', { className: 'cg-bar' },
+          h('div', { className: 'cg-bar-fill', style: { width: percent(Math.min(1, ratio)), background: TONE_COLOR[toneName] } }),
+        ),
+        h('p', { className: 'cg-advice' }, t(lang, adviceKey)),
+        h('div', { className: 'cg-stats' },
+          statRow(t(lang, 'tokens'), `${overflow ? '>100%' : percent(ratio)} · ${compactTokens(promptTokens)} / ${compactTokens(contextWindow)}`),
+          statRow(t(lang, 'cache'), data && data.cacheReadTokens > 0 ? `${Math.round(cacheHitRate * 100)}%` : '—'),
+          statRow(t(lang, 'turns'), `${turns}${toolCalls > 0 ? ' · ' + toolCalls + ' 次工具' : ''}`),
+          statRow(t(lang, 'coherence'), h('span', { className: 'cg-coherence', style: { color: coherenceColor } }, t(lang, coherenceKey))),
+        ),
+        h('div', { className: 'cg-decide' },
+          h('div', { className: 'cg-decide-title' }, t(lang, 'decideTitle')),
+          h('div', { className: 'cg-decide-grid' },
+            h('div', { className: 'cg-decide-card cg-decide-keep' },
+              h('div', { className: 'cg-decide-head' }, t(lang, 'keepTitle')),
+              h('ul', { className: 'cg-decide-list' },
+                asList(t(lang, 'keepWhen')).map((line, index) => h('li', { key: 'keep-' + index, className: 'cg-pro' }, line)),
+              ),
+            ),
+            h('div', { className: 'cg-decide-card cg-decide-new' },
+              h('div', { className: 'cg-decide-head' }, t(lang, 'newTitle')),
+              h('ul', { className: 'cg-decide-list' },
+                asList(t(lang, 'newWhen')).map((line, index) => h('li', { key: 'new-' + index, className: 'cg-con' }, line)),
+              ),
+            ),
+          ),
+          h('div', { className: `cg-rec cg-rec-${recommend}` }, t(lang, recommendTextKey)),
+        ),
+        h('button', {
+          type: 'button',
+          className: `cg-migrate${recommend === 'new' ? ' cg-migrate-primary' : ''}`,
+          disabled: busy || !sessionId,
+          onClick: doMigrate,
+        }, busy ? t(lang, 'working') : t(lang, 'migrateNow')),
+        handoff && handoff.path ? h('div', { className: 'cg-path' }, h('code', null, handoff.path)) : null,
+        data && data.estimated ? h('p', { className: 'cg-hint cg-dim' }, t(lang, 'estNote')) : null,
+        toastText ? h('div', { className: 'cg-toast' }, toastText) : null,
+        ),
+      )
+    }
+
+    function Toast() {
+      const text = useToast()
+      if (!text) return null
+      return h('div', { className: 'cg-toast-floating' }, text)
+    }
+
+    const STYLES = `
+.cg-badge { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 9px; border-radius:7px; border:1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.35)); background:transparent; color:inherit; font:inherit; font-size:12px; line-height:1; font-variant-numeric:tabular-nums; cursor:pointer; }
+.cg-badge-dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+.cg-chip { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 9px; border-radius:7px; border:1px solid rgba(255,255,255,.14); background:linear-gradient(160deg, #333842 0%, #24272e 58%, #1d2027 100%); color:inherit; font:inherit; font-size:13px; line-height:1; font-variant-numeric:tabular-nums; cursor:pointer;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,.22), inset -1px -1px 0 rgba(0,0,0,.4), 0 2px 0 #0b0d12, 0 3px 5px rgba(0,0,0,.32);
+  transition: transform .08s ease, box-shadow .08s ease; }
+.wf-theme-light .cg-chip { border-color:#c6cdda; background:linear-gradient(160deg, #fdfefe 0%, #eef1f7 58%, #e3e8f1 100%); color:#262b34;
+  box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 rgba(15,20,30,.12), 0 2px 0 #b6becd, 0 3px 5px rgba(16,24,40,.16); }
+.cg-chip:active { transform: translateY(1px); box-shadow: inset 1px 1px 0 rgba(255,255,255,.16), inset -1px -1px 0 rgba(0,0,0,.38), 0 1px 0 #0b0d12, 0 2px 3px rgba(0,0,0,.28); }
+.cg-chip-dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+.cg-chip.cg-alarm, .cg-badge.cg-alarm { background: rgba(255,45,85,.14); animation: cg-alarm-pulse 1s ease-in-out infinite; }
+@keyframes cg-alarm-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,45,85,.55); opacity: 1; }
+  50% { box-shadow: 0 0 0 7px rgba(255,45,85,0); opacity: .5; }
+}
+.cg-mask { position:fixed; inset:0; z-index:2147483200; pointer-events:none; }
+.cg-mask > .cg-card { pointer-events:auto; }
+.cg-card { position:absolute; top:64px; right:24px; width:420px; max-width:calc(100vw - 48px); max-height:calc(100vh - 48px); overflow:auto; padding:18px 20px 16px; border-radius:12px; border:1px solid rgba(96,165,250,.55); background:var(--dsw-alias-bg-layer-1, #17171b); color:var(--dsw-alias-label-primary, #f4f4f5); box-shadow: 0 0 0 1px rgba(96,165,250,.35), 0 0 18px rgba(96,165,250,.32), 0 0 44px rgba(255,255,255,.10), 0 24px 48px -16px rgba(0,0,0,.6), 0 8px 20px -8px rgba(0,0,0,.35); font-size:14px; }
+.cg-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.cg-title { font-size:13px; font-weight:600; letter-spacing:.02em; flex:1 1 auto; }
+.cg-icon { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; border:1px solid transparent; background:transparent; color:inherit; font-size:14px; line-height:1; cursor:pointer; opacity:.7; }
+.cg-icon:hover { opacity:1; background:rgba(255,255,255,.08); }
+.cg-note { margin:10px 0 0; padding:8px 10px; border-radius:8px; border:1px solid rgba(251,191,36,.4); background:rgba(251,191,36,.08); color:#fbbf24; font-size:12px; line-height:1.6; }
+.cg-health { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:14px 0 2px; }
+.cg-health-num { font-size:40px; line-height:1; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.cg-health-meta { display:flex; flex-direction:column; align-items:flex-end; gap:3px; text-align:right; }
+.cg-health-status { font-size:13px; font-weight:600; }
+.cg-health-cap { font-size:11.5px; opacity:.6; font-variant-numeric:tabular-nums; }
+.cg-bar { height:6px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; margin:10px 0 2px; }
+.cg-bar-fill { height:100%; border-radius:inherit; transition: width .3s ease; }
+.cg-advice { margin:12px 0 10px; line-height:1.7; font-size:13.5px; }
+.cg-stats { display:flex; flex-direction:column; gap:6px; padding:10px 12px; border-radius:9px; background:rgba(255,255,255,.04); }
+.cg-stat { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12.5px; }
+.cg-stat-label { opacity:.6; }
+.cg-stat-value { font-variant-numeric:tabular-nums; text-align:right; }
+.cg-coherence { font-weight:700; }
+.cg-decide { margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,.08); }
+.cg-decide-title { font-size:12.5px; font-weight:600; margin-bottom:8px; opacity:.85; }
+.cg-decide-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.cg-decide-card { padding:10px 11px; border-radius:9px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.06); }
+.cg-decide-head { font-size:12.5px; font-weight:600; margin-bottom:6px; }
+.cg-decide-list { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:5px; font-size:11.5px; line-height:1.6; }
+.cg-decide-list li { position:relative; padding-left:12px; opacity:.85; }
+.cg-decide-list li::before { content:''; position:absolute; left:0; top:.62em; width:4px; height:4px; border-radius:50%; background:currentColor; opacity:.6; }
+.cg-decide-list .cg-pro { color:#6ee7b7; }
+.cg-decide-list .cg-con { color:#fbbf24; }
+.cg-decide-keep .cg-decide-head { color:#6ee7b7; }
+.cg-decide-new .cg-decide-head { color:#fbbf24; }
+.cg-rec { margin-top:10px; padding:9px 11px; border-radius:9px; font-size:12.5px; line-height:1.6; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.04); }
+.cg-rec-new { border-color:rgba(239,68,68,.45); background:rgba(239,68,68,.10); color:#fecaca; }
+.cg-rec-keep { border-color:rgba(52,211,153,.40); background:rgba(52,211,153,.08); color:#a7f3d0; }
+.cg-rec-either { border-color:rgba(251,191,36,.45); background:rgba(251,191,36,.08); color:#fde68a; }
+.cg-migrate { width:100%; height:38px; margin:12px 0 4px; border-radius:9px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); color:inherit; font-size:13.5px; font-weight:600; cursor:pointer; transition: background .16s ease, box-shadow .16s ease; }
+.cg-migrate-primary { background:#f4f4f5; color:#0b0b0e; }
+.cg-migrate:hover:not(:disabled) { box-shadow: 0 0 0 1px rgba(96,165,250,.5), 0 0 16px rgba(96,165,250,.28); }
+.cg-migrate-primary:hover:not(:disabled) { background:#ffffff; }
+.cg-migrate:disabled { opacity:.55; cursor:default; }
+.cg-path { margin-top:6px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; word-break:break-all; opacity:.85; }
+.cg-hint { margin:8px 0 0; font-size:11.5px; }
+.cg-dim { opacity:.6; }
+.cg-toast { margin-top:8px; font-size:12px; line-height:1.5; opacity:.85; }
+.cg-toast-floating { position:fixed; left:50%; bottom:48px; transform:translateX(-50%); z-index:2147483210; max-width:min(560px, calc(100vw - 48px)); padding:10px 14px; border-radius:9px; border:1px solid rgba(125,146,255,.35); background:#1b1b22; color:#f4f4f5; font-size:13px; line-height:1.5; box-shadow:0 12px 28px -10px rgba(0,0,0,.7); pointer-events:none; }
+.wf-panel.cg-panel-blurred, .wf-pill.cg-panel-blurred { filter: blur(2.5px) saturate(.8) brightness(.86); opacity:.42; pointer-events:none; transition: filter .18s ease, opacity .18s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .cg-chip.cg-alarm, .cg-badge.cg-alarm { animation: none; }
+  .wf-panel.cg-panel-blurred, .wf-pill.cg-panel-blurred { transition: none; }
+}
+`
+
+    function injectStyles() {
+      if (typeof document === 'undefined') return () => {}
+      const id = 'context-guard-styles'
+      let element = document.getElementById(id)
+      if (!element) {
+        element = document.createElement('style')
+        element.id = id
+        element.setAttribute('data-plugin', 'dsh-context-guard')
+        element.textContent = STYLES
+        document.head.appendChild(element)
+      }
+      return () => {
+        const current = document.getElementById(id)
+        if (current) current.remove()
+      }
+    }
+
+    return {
+      inject: ['slots'],
+      apply(ctx) {
+        const slots = ctx.slots || ctx.get('slots')
+        if (!slots) return
+        uiWorkspaceService = ctx.get('uiWorkspace') || null
+        ctx.effect(() => injectStyles(), 'context-guard: styles')
+        ctx.effect(() => {
+          const off = slots.inject('conversation.session.header.utilities', () => slots.register({ name: 'conversation.session.header.utilities', id: 'context-guard-session', order: 25 }, SessionRecorder))
+          return off
+        }, 'context-guard: session recorder')
+        ctx.effect(() => {
+          let cancel = null
+          let timer = null
+          const attach = () => {
+            const bridge = typeof window !== 'undefined' ? window.__dshWideFocus : null
+            if (!bridge || typeof bridge.onSessionChange !== 'function') return
+            if (timer) { clearInterval(timer); timer = null }
+            if (typeof bridge.getSessionId === 'function') {
+              const initial = bridge.getSessionId()
+              if (initial) setCurrentSession(initial)
+            }
+            cancel = bridge.onSessionChange((id) => setCurrentSession(id))
+          }
+          attach()
+          timer = setInterval(attach, 500)
+          return () => {
+            if (timer) clearInterval(timer)
+            if (cancel) cancel()
+          }
+        }, 'context-guard: session from wide-focus bridge')
+        ctx.effect(() => {
+          let cancelTool = null
+          let cancelBadge = null
+          let attachedTo = null
+          const attachTool = () => {
+            const bridge = typeof window !== 'undefined' ? window.__dshWideFocus : null
+            if (!bridge || typeof bridge.registerTool !== 'function') return
+            if (attachedTo === bridge
+              && typeof bridge.hasTool === 'function'
+              && bridge.hasTool('context-guard')) return
+            if (cancelTool) { try { cancelTool() } catch { /* ignore */ } cancelTool = null }
+            attachedTo = bridge
+            cancelTool = bridge.registerTool('context-guard', Chip)
+            if (cancelBadge) { try { cancelBadge() } catch { /* ignore */ } cancelBadge = null }
+          }
+          attachTool()
+          const timer = setInterval(attachTool, 1000)
+          const fallback = setTimeout(() => {
+            if (cancelTool || cancelBadge) return
+            cancelBadge = slots.inject('conversation.session.header.utilities', () => slots.register({ name: 'conversation.session.header.utilities', id: 'context-guard-badge', order: 26 }, Badge))
+          }, 2500)
+          return () => {
+            clearInterval(timer)
+            clearTimeout(fallback)
+            if (cancelTool) cancelTool()
+            if (cancelBadge) cancelBadge()
+          }
+        }, 'context-guard: panel chip or header badge')
+        ctx.effect(() => {
+          const off = slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'context-guard-card', order: 63, label: '上下文健康度' }, Card))
+          return off
+        }, 'context-guard: context card')
+        ctx.effect(() => {
+          const off = slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'context-guard-toast', order: 64, label: '上下文提醒' }, Toast))
+          return off
+        }, 'context-guard: toast')
+        try {
+          window.__contextGuard = {
+            version: '0.9.2',
+            hasBridge: () => Boolean(window.__dshWideFocus),
+            toolAttached: () => Boolean(window.__dshWideFocus && typeof window.__dshWideFocus.hasTool === 'function' && window.__dshWideFocus.hasTool('context-guard')),
+            open: () => openState,
+            toggle: (next) => setOpen(next === undefined ? !openState : next),
+            simulate: (input) => simulate(input),
+          }
+        } catch { /* ignore */ }
+      },
+    }
+    })()
     return {
       inject: ['slots'],
       __test: { splitTaskText, moveTaskInList, normalizeTask, splitKeyword: stripKeyword, panelDragPreview, numberTasks },
@@ -2722,6 +3533,8 @@ window.__ModuleLoader__.load({
             restoreWidthTargets()
           }
         }, 'wide-focus: width axis')
+
+        __contextGuard.apply(ctx)
       },
     }
   },

@@ -18,6 +18,7 @@ const fakeDocument = {
   },
   head: { appendChild(node) { styleNodes.push(node) }, removeChild() {} },
   body: { appendChild() {}, removeChild() {} },
+  getElementById() { return null },
   createElement() { return { setAttribute() {}, textContent: '', remove() {}, style: {}, appendChild() {} } },
   querySelectorAll() { return [] },
   querySelector() { return null },
@@ -42,6 +43,12 @@ globalThis.window = {
   matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
 }
 globalThis.document = fakeDocument
+// the merged context-guard half polls the session bridge on a real timer; keep
+// the probe process single-shot by neutralising timers globally as well.
+globalThis.setInterval = () => 0
+globalThis.clearInterval = () => {}
+globalThis.setTimeout = () => 0
+globalThis.clearTimeout = () => {}
 const store = new Map()
 globalThis.localStorage = {
   getItem: (k) => (store.has(k) ? store.get(k) : null),

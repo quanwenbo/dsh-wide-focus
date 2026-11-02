@@ -25,6 +25,7 @@ const fakeDocument = {
   },
   head: { appendChild(node) { styleNodes.push(node) }, removeChild() {} },
   body: { appendChild() {}, removeChild() {} },
+  getElementById() { return null },
   createElement() {
     return {
       attrs: {},
@@ -70,6 +71,11 @@ globalThis.document = fakeDocument
 globalThis.localStorage = fakeLocalStorage
 Object.defineProperty(globalThis, 'navigator', { value: { language: 'zh-CN' }, configurable: true })
 globalThis.EventSource = FakeEventSource
+// merged context-guard half uses real global timers to watch the bridge
+globalThis.setInterval = () => 0
+globalThis.clearInterval = () => {}
+globalThis.setTimeout = () => 0
+globalThis.clearTimeout = () => {}
 globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, value: { tasks: [], workspaces: [] } }) })
 globalThis.MutationObserver = class {
   observe() {}

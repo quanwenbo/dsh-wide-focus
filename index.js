@@ -13,6 +13,7 @@
  *
  * @module wide-focus (host)
  */
+import fs from 'node:fs/promises'
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -21,6 +22,16 @@ export const name = 'wide-focus'
 
 const ROUTE = '/wide-focus/tasks'
 const MAX_BODY = 2 * 1024 * 1024
+
+// context guard constants (merged)
+const CG_MAX_BODY = 64 * 1024
+const ROUTE_STATE = '/context-guard/state'
+const ROUTE_HANDOFF = '/context-guard/handoff'
+const WARN_RATIO = 0.6
+const MID_RATIO = 0.7
+const HIGH_RATIO = 0.8
+const SWITCH_RATIO = 0.85
+const DEFAULT_WINDOW = 128000
 
 function dataPath() {
   const base = process.env.DSH_PROFILE_DIR
@@ -74,6 +85,312 @@ async function writeTasks(file, tasks) {
   }
 }
 
+// ---- context guard analysis (merged from @local/context-guard) ---------------
+function textOfMessage(message) {
+  if (!message) return ''
+  const content = message.content
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    const parts = []
+    for (const block of content) {
+      if (block && block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
+    }
+    return parts.join('\n')
+  }
+  return ''
+}
+
+const FILE_KEYS = ['path', 'file_path', 'notebook_path', 'target_file', 'filePath', 'filepath']
+
+function noteFilePath(argumentsText, files) {
+  if (typeof argumentsText !== 'string' || argumentsText.length === 0 || argumentsText.length > 20000) return
+  let args
+  try { args = JSON.parse(argumentsText) } catch { return }
+  if (!args || typeof args !== 'object') return
+  for (const key of FILE_KEYS) {
+    const value = args[key]
+    if (typeof value === 'string' && value.length > 0 && value.length < 400) files.set(value, (files.get(value) || 0) + 1)
+  }
+}
+
+function analyze(session, tokenMeter, projections) {
+  const events = session.snapshotEvents()
+  let usage = null
+  let model = null
+  let provider = null
+  let turns = 0
+  let toolCalls = 0
+  const files = new Map()
+  const turnStats = []
+  let messageChars = 0
+  for (const event of events) {
+    if (event.type === 'user/message' || event.type === 'assistant/message') {
+      const data = event.data || {}
+      messageChars += textOfMessage(data.message).length
+    }
+    if (event.type === 'turn/start') {
+      turns += 1
+      turnStats.push({ tools: 0, answers: 0 })
+      continue
+    }
+    const current = turnStats[turnStats.length - 1]
+    if (event.type === 'tool/call') {
+      toolCalls += 1
+      if (current) current.tools += 1
+      noteFilePath(event.data && event.data.arguments, files)
+    } else if (event.type === 'assistant/message') {
+      if (current) current.answers += 1
+      const data = event.data || {}
+      if (data.usage) usage = data.usage
+      const source = data.message && data.message.source
+      if (source && typeof source.model === 'string') model = source.model
+      if (source && typeof source.provider === 'string') provider = source.provider
+    }
+  }
+  const recentTurns = turnStats.slice(-10)
+  const answerOnly = recentTurns.filter((turn) => turn.tools === 0 && turn.answers > 0).length
+  const looksLikeDiscussion = recentTurns.length >= 3 && answerOnly / recentTurns.length >= 0.5
+  const requestContext = typeof session.requestContext === 'function' ? session.requestContext() : undefined
+  const requestHeader = typeof session.requestHeader === 'function' ? session.requestHeader() : undefined
+  let projectionPressure = 0
+  let projectionWindow = 0
+  if (projections && typeof projections.stateOf === 'function') {
+    try {
+      const pressure = projections.stateOf(session, 'contextPressure')
+      if (pressure) {
+        projectionPressure = Number(pressure.projectedTokens) || 0
+        projectionWindow = Number(pressure.contextWindow) || 0
+        if (projectionPressure === 0) projectionPressure = Number(pressure.pressureTokens) || 0
+      }
+    } catch { /* projection unavailable in this process */ }
+  }
+  const windowFromContext = Number(requestContext && requestContext.contextWindow) || 0
+  const contextWindow = projectionWindow > 0 ? projectionWindow : (windowFromContext > 0 ? windowFromContext : DEFAULT_WINDOW)
+  if (requestContext && typeof requestContext.model === 'string') model = model || requestContext.model
+  if (requestContext && typeof requestContext.provider === 'string') provider = provider || requestContext.provider
+  const reasoningEffort = requestHeader && requestHeader.config && requestHeader.config.reasoningEffort
+    ? String(requestHeader.config.reasoningEffort)
+    : null
+  let inputTokens = Number(usage && usage.inputTokens) || 0
+  let outputTokens = Number(usage && usage.outputTokens) || 0
+  let cacheReadTokens = Number(usage && usage.cacheReadTokens) || 0
+  let cacheWriteTokens = Number(usage && usage.cacheWriteTokens) || 0
+  let estimated = false
+  let source = 'none'
+  let promptTokens = 0
+
+  // 1) The provider's own last report, folded by sessionProjections, is the
+  //    closest thing to "what the model actually saw last".
+  const usagePrompt = inputTokens + cacheReadTokens + cacheWriteTokens
+  if (projectionPressure > 0) {
+    promptTokens = projectionPressure
+    source = 'pressure'
+  } else if (usagePrompt > 0) {
+    promptTokens = usagePrompt
+    source = 'usage'
+  }
+
+  // 2) tokenMeter only wins when it can reuse the provider's accounting for the
+  //    current envelope. A full-envelope re-estimate can exceed the model window
+  //    and must never be displayed as the live prompt size.
+  if (source === 'none' && tokenMeter && typeof tokenMeter.measure === 'function') {
+    try {
+      const measured = tokenMeter.measure(session, requestHeader)
+      const total = Number(measured && measured.totalTokens)
+      const kind = measured && measured.baseline ? measured.baseline.kind : 'none'
+      if (total > 0 && (kind === 'usage' || total <= contextWindow)) {
+        promptTokens = total
+        source = 'meter'
+        estimated = kind !== 'usage'
+        const baseUsage = kind === 'usage' ? measured.baseline.usage : null
+        if (baseUsage) {
+          inputTokens = Number(baseUsage.inputTokens) || inputTokens
+          cacheReadTokens = Number(baseUsage.cacheReadTokens) || cacheReadTokens
+          cacheWriteTokens = Number(baseUsage.cacheWriteTokens) || cacheWriteTokens
+        }
+      }
+    } catch { /* fall back to character estimate */ }
+  }
+
+  if (promptTokens === 0) {
+    // Restored / background sessions often keep no `usage` on the live snapshot:
+    // fall back to a character-based estimate of the replayed history so the badge
+    // is never stuck at 0% for a session that clearly has content.
+    try {
+      const messages = typeof session.deriveMessages === 'function' ? session.deriveMessages() : []
+      let chars = 0
+      for (const message of messages) {
+        const content = message && Array.isArray(message.content) ? message.content : []
+        for (const block of content) {
+          if (block && typeof block.text === 'string') chars += block.text.length
+          else if (block && typeof block.arguments === 'string') chars += block.arguments.length
+        }
+      }
+      if (chars > 0) {
+        inputTokens = Math.round(chars / 3.2)
+        promptTokens = inputTokens
+        estimated = true
+      }
+    } catch { /* keep 0 */ }
+    if (promptTokens === 0 && messageChars > 0) {
+      inputTokens = Math.round(messageChars / 3.2)
+      promptTokens = inputTokens
+      estimated = true
+    }
+  }
+  const rawRatio = contextWindow > 0 ? promptTokens / contextWindow : 0
+  const ratio = Math.min(rawRatio, 1)
+  const overflow = rawRatio > 1.02
+  const cacheHitRate = promptTokens > 0 ? Math.min(cacheReadTokens / promptTokens, 1) : 0
+  return {
+    model,
+    provider,
+    reasoningEffort,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    promptTokens,
+    contextWindow,
+    ratio,
+    rawRatio,
+    overflow,
+    source,
+    estimated,
+    cacheHitRate,
+    turns,
+    toolCalls,
+    eventCount: events.length,
+    recentTurns: recentTurns.length,
+    answerOnly,
+    looksLikeDiscussion,
+    effortHint: looksLikeDiscussion ? 'low' : null,
+    files: Array.from(files.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([path, count]) => ({ path, count })),
+    thresholds: { warn: WARN_RATIO, mid: MID_RATIO, high: HIGH_RATIO, switch: SWITCH_RATIO },
+  }
+}
+
+// Exposed for local probes: the measurement chain is the part most likely to
+// drift when DSH changes its usage/projection contracts.
+export const __test = { analyze }
+
+
+function profileDir() {
+  const base = process.env.DSH_PROFILE_DIR || process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+  return base
+}
+
+async function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0
+    const chunks = []
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > MAX_BODY) { reject(new Error('body too large')); req.destroy(); return }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      const text = Buffer.concat(chunks).toString('utf8')
+      if (!text) { resolve({}); return }
+      try { resolve(JSON.parse(text)) } catch (error) { reject(error) }
+    })
+    req.on('error', reject)
+  })
+}
+
+function stamp(date) {
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`
+}
+
+async function readOpenTodos() {
+  try {
+    const file = path.join(profileDir(), 'wide-focus', 'tasks.json')
+    const raw = await fs.readFile(file, 'utf8')
+    const parsed = JSON.parse(raw)
+    const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : []
+    return tasks.filter((task) => task && task.status !== 'done' && !task.trashedAt)
+  } catch {
+    return []
+  }
+}
+
+function recentUserTexts(events, limit) {
+  const texts = []
+  for (const event of events) {
+    if (event.type !== 'user/message') continue
+    const text = textOfMessage(event.data && event.data.message).trim()
+    if (text) texts.push(text)
+  }
+  return texts.slice(-limit)
+}
+
+function lastAssistantText(events, limit) {
+  let last = ''
+  for (const event of events) {
+    if (event.type !== 'assistant/message') continue
+    const text = textOfMessage(event.data && event.data.message).trim()
+    if (text) last = text
+  }
+  return last.slice(0, limit)
+}
+
+async function buildHandoff(session, analysis) {
+  const events = typeof session.snapshotEvents === 'function' ? session.snapshotEvents() : []
+  const cwd = session.header && session.header.cwd ? String(session.header.cwd) : process.cwd()
+  const asks = recentUserTexts(events, 8)
+  const lastAnswer = lastAssistantText(events, 1200)
+  const todos = await readOpenTodos()
+  const files = Array.isArray(analysis.files) ? analysis.files.slice(0, 8) : []
+  const percent = Math.round((Number(analysis.ratio) || 0) * 100)
+  const sessionShort = String(session.id || '').slice(-8)
+
+  const lines = []
+  lines.push(`# 会话交接：${sessionShort}`, '')
+  lines.push(`> 生成时间：${new Date().toLocaleString('zh-CN', { hour12: false })} · 会话 \`${session.id}\` · 模型 \`${analysis.model || 'unknown'}\` · 占用 ${percent}%${analysis.estimated ? '（估算）' : ''}`, '')
+  lines.push('## 一、我们在做什么', '')
+  if (asks.length) {
+    lines.push('最近的需求（从旧到新）：', '')
+    for (const ask of asks) lines.push(`- ${ask.split('\n')[0].slice(0, 160)}`)
+  } else {
+    lines.push('- （没有拿到用户消息，从「三、当前状态」继续。）')
+  }
+  lines.push('')
+  lines.push('## 二、最近改了什么', '')
+  if (files.length) {
+    for (const file of files) lines.push(`- \`${file.path}\`（${file.count} 次）`)
+  } else {
+    lines.push('- （没有记录到文件改动。）')
+  }
+  lines.push('')
+  lines.push('## 三、当前状态', '')
+  lines.push(`- 上下文占用：${percent}%${analysis.estimated ? '（按消息长度估算）' : ''}`)
+  lines.push(`- 轮次：${analysis.turns} · 工具调用：${analysis.toolCalls} · 事件数：${analysis.eventCount}`)
+  lines.push(`- 模型：\`${analysis.model || 'unknown'}\` · 推理强度：\`${analysis.reasoningEffort || 'default'}\``)
+  if (lastAnswer) {
+    lines.push('', '最后一条回答（截断）：', '', '> ' + lastAnswer.replace(/\n+/g, '\n> '))
+  }
+  lines.push('')
+  lines.push('## 四、关键决策 / 约束', '')
+  lines.push('- 见任务面板里的待办与上文记录；未写下来的隐性上下文不会自动带过去。')
+  lines.push('')
+  lines.push('## 五、下一步（自动生成，可修改）', '')
+  if (todos.length > 0) {
+    lines.push(`- [ ] 继续任务面板里的「${String(todos[0].title || '').slice(0, 60)}」（当前状态 ${todos[0].status}）`)
+  }
+  for (const file of files.slice(0, 3)) lines.push(`- [ ] 回归最近改动：\`${file.path}\``)
+  lines.push('- [ ] 先把这份交接读一遍，再继续')
+  if (asks.length > 0) lines.push(`- [ ] 最近一条请求：${asks[asks.length - 1].split('\n')[0].slice(0, 120)}`)
+  lines.push('')
+
+  const markdown = lines.join('\n')
+  const dir = path.join(cwd, 'docs', 'handoff')
+  await fs.mkdir(dir, { recursive: true })
+  const file = path.join(dir, `${stamp(new Date())}-${sessionShort}.md`)
+  await fs.writeFile(file, markdown, 'utf8')
+  return { path: file, markdown }
+}
+
 export function apply(ctx) {
   const file = dataPath()
 
@@ -104,4 +421,61 @@ export function apply(ctx) {
     const dispose = webCtx.webServer.register({ kind: 'exact', path: ROUTE, handler })
     return () => { dispose() }
   })
+
+  // ---- context guard routes (merged) ----------------------------------------
+const stateHandler = async (req, res) => {
+      try {
+        if (req.method !== 'GET') { sendJson(res, 405, { ok: false, error: { code: 'method_not_allowed', message: req.method } }); return }
+        const url = new URL(req.url || '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId') || ''
+        const sessions = ctx.get('sessions')
+        if (!sessions || typeof sessions.get !== 'function') {
+          sendJson(res, 503, { ok: false, error: { code: 'sessions_unavailable', message: 'session store not ready' } })
+          return
+        }
+        const session = sessionId ? sessions.get(sessionId) : undefined
+        if (!session) {
+          sendJson(res, 404, { ok: false, error: { code: 'session_not_live', message: 'session is not live in this process' } })
+          return
+        }
+        const analysis = analyze(session, ctx.get('tokenMeter'), ctx.get('sessionProjections'))
+        sendJson(res, 200, { ok: true, value: { session: String(session.id), cwd: session.header && session.header.cwd ? session.header.cwd : null, ...analysis } })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        sendJson(res, 500, { ok: false, error: { code: 'state_failed', message } })
+      }
+    }
+  
+    const handoffHandler = async (req, res) => {
+      try {
+        if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: { code: 'method_not_allowed', message: req.method } }); return }
+        const body = await readJsonBody(req)
+        const sessionId = String((body && body.sessionId) || '')
+        const sessions = ctx.get('sessions')
+        if (!sessions || typeof sessions.get !== 'function') {
+          sendJson(res, 503, { ok: false, error: { code: 'sessions_unavailable', message: 'session store not ready' } })
+          return
+        }
+        const session = sessionId ? sessions.get(sessionId) : undefined
+        if (!session) {
+          sendJson(res, 404, { ok: false, error: { code: 'session_not_live', message: 'session is not live in this process' } })
+          return
+        }
+        const analysis = analyze(session, ctx.get('tokenMeter'), ctx.get('sessionProjections'))
+        const value = await buildHandoff(session, analysis)
+        sendJson(res, 200, { ok: true, value })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        sendJson(res, 500, { ok: false, error: { code: 'handoff_failed', message } })
+      }
+    }
+  
+    ctx.inject(['webServer'], (webCtx) => {
+      const disposeState = webCtx.webServer.register({ kind: 'exact', path: ROUTE_STATE, handler: stateHandler })
+      const disposeHandoff = webCtx.webServer.register({ kind: 'exact', path: ROUTE_HANDOFF, handler: handoffHandler })
+      return () => {
+        disposeState()
+        disposeHandoff()
+      }
+    })
 }

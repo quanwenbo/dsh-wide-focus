@@ -1,7 +1,7 @@
 {
   "name": "dsh-wide-focus",
-  "version": "0.11.20",
-  "description": "DSH Web 客户端的宽读模式与可拖动悬浮任务面板（四标签、快捷键、本机持久化）",
+  "version": "0.12.0",
+  "description": "DSH Web 客户端的宽读模式、可拖动悬浮任务面板，以及上下文管家（占用/缓存/连贯性 + 交接建议）",
   "license": "MIT",
   "author": "BOB",
   "repository": {
@@ -17,7 +17,8 @@
     "dsh-plugin",
     "deepseek-harness",
     "wide-mode",
-    "task-panel"
+    "task-panel",
+    "context-guard"
   ],
   "type": "module",
   "engines": {

@@ -1,29 +1,38 @@
-# dsh-wide-focus · 宽屏 + 悬浮任务面板
+# dsh-wide-focus · 宽屏 + 悬浮任务面板 + 上下文管家
 
-Two things for the DSH desktop client, both local and dependency-free:
+Everything below ships in **one plugin** — the former `dsh-context-guard` is
+merged in since v0.12.0 (chip, context card, `/context-guard/*` routes).
+
+Three things for the DSH desktop client, all local and dependency-free:
 
 1. **Wide reading mode** — the chat column stops at `100% - 40px` instead of a
    narrow reading measure, so long answers and back-and-forth stay on screen.
 2. **Floating task panel** — a small todo board that lives above the
    conversation. Drag it anywhere, collapse it to a pill, resize it from either
    bottom corner, and press `R` to bring it back when the chat buries it.
+3. **上下文管家** — a pressure chip in the panel bar; click it for live context
+   occupancy, cache hit rate, task coherence and a keep-vs-new-session
+   recommendation, with a one-click handoff document + new session.
 
 Everything is stored on this machine; the plugin makes no network calls of its
-own (the panel talks to its own host route, see *Storage* below).
+own (the panel talks to its own host routes, see *Storage* and *Context guard*).
 
 ## Install
 
 ```powershell
-# 1) 从 AtomGit（公开仓库，固定 commit）
-dsh plugin --profile desktop add git+https://github.com/quanwenbo/dsh-wide-focus.git#<commit-sha>
+# 1) 从 GitHub（公开仓库，固定 commit）
+dsh plugin --profile desktop add git+https://github.com/quanwenbo/dsh-wide-focus.git#fd1cb2f92481de72c9bb3c54695d403f1dc98b4f
 
 # 2) 从本地目录（开发时）
 dsh plugin --profile desktop add C:\Users\BOB\dsh-plugins\wide-focus
 ```
 
+If the old `dsh-context-guard` is still installed, remove it
+(`dsh plugin --profile desktop remove dsh-context-guard`) to avoid two chips.
+
 The client half hot-reloads on refresh. The host half (`index.js`) registers
-`/wide-focus/tasks`, so it takes one desktop restart the first time (or after
-editing `index.js`).
+`/wide-focus/tasks`, `/context-guard/state` and `/context-guard/handoff`, so it
+takes one desktop restart the first time (or after editing `index.js`).
 
 本插件不依赖任何 npm 运行时包：`client.js` 是预构建 ESM，`index.js` 是普通 ESM，
 `cordis.patch.yml` 在包根目录，因此从 git 或 tgz 安装都不需要构建步骤。
@@ -138,6 +147,29 @@ The panel degrades by its own width instead of squeezing text:
   ellipsis and show their body when expanded.
 - The drag hint is a six-dot grip icon next to the theme switch (the whole
   title bar is still the drag surface and still toggles on click).
+
+## Context guard (merged)
+
+The former `dsh-context-guard` plugin now lives inside this one.
+
+- **Chip** — a `NN%` pressure badge in the panel bar (`shell.overlay`, registered
+  through the bridge, id `context-guard`). Colour ladder: green → amber →
+  orange → red → pulsing red (`ok / warn / hot / danger / alarm`, thresholds
+  60 / 70 / 80 / 85 %).
+- **Card** — click the chip: big occupancy number, status word, token line,
+  progress bar, advice, four metrics (token occupancy, cache hit rate, turns &
+  tool calls, task coherence), a keep-vs-new two-column trade-off, the
+  recommendation, and a single button “生成交接文档并新开会话”. The card anchors
+  to the task panel and blurs it behind a glass veil while open.
+- **Thresholds** — 60 % recolours only; 70 / 80 / 85 % each raise one toast;
+  80 % auto-opens the card **once per session** (any manual close wins).
+- **Host routes** — `GET /context-guard/state?sessionId=` and
+  `POST /context-guard/handoff`; handoff writes
+  `<cwd>/docs/handoff/YYYYMMDD-HHmm-<id>.md` with five sections (what we are
+  doing / what changed / current state / decisions & constraints / next steps).
+- Occupancy comes from DSH's own `contextPressure` projection first (matching
+  `contextOccupancy()`), then the provider usage, then `tokenMeter`; only when
+  all are unavailable does it fall back to a message-length estimate (`≈`).
 
 ## Storage
 
