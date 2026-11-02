@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Wide Focus & Task Panel",
-    "description": "Switch the conversation to a wide reading layout and keep a floating task panel with each task's plan and acceptance checklist."
+    "title": "Wide Focus · Task Panel · Context Guard",
+    "description": "Switch the conversation to a wide reading layout, keep a floating tabbed task panel for plans and acceptance, and watch a live context-pressure chip with occupancy, cache hit rate, coherence and a keep-or-restart handoff recommendation."
   }
 }

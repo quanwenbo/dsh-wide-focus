@@ -14,7 +14,7 @@
 
 ```powershell
 # 1) 从 GitHub（公开仓库，固定 tag）
-dsh plugin --profile desktop add git+https://github.com/quanwenbo/dsh-wide-focus.git#v0.12.2
+dsh plugin --profile desktop add git+https://github.com/quanwenbo/dsh-wide-focus.git#v0.12.3
 
 # 2) 从本地目录（开发时）
 dsh plugin --profile desktop add C:\Users\BOB\dsh-plugins\wide-focus
