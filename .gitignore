@@ -4,3 +4,4 @@ _preview/
 _scratch/
 *.tmp
 *.log
+docs/screenshots/*.html

@@ -448,7 +448,7 @@ window.__ModuleLoader__.load({
       if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string') return null
       const title = typeof raw.title === 'string' ? raw.title : typeof raw.note === 'string' ? raw.note : ''
       if (title.trim().length === 0) return null
-      const status = STATUSES.some((item) => item.key === raw.status) ? raw.status : 'todo'
+      const status = STATUSES.some((item) => item.key === raw.status) || raw.status === 'done' ? raw.status : 'todo'
       const body = typeof raw.body === 'string' ? raw.body : ''
       return {
         id: raw.id,
