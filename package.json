@@ -20,6 +20,9 @@
     "task-panel"
   ],
   "type": "module",
+  "engines": {
+    "dsh": ">=0.2.0-rc.1 <0.3.0-0"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
