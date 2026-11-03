@@ -25,6 +25,10 @@ const MAX_BODY = 2 * 1024 * 1024
 
 // context guard constants (merged)
 const CG_MAX_BODY = 64 * 1024
+const ROUTE_EFFORT = '/wide-focus/effort'
+const EFFORT_LEVELS = ['off', 'low', 'high', 'max']
+const EFFORT_LABELS = { off: 'Off', low: 'Low', high: 'High', max: 'Max' }
+
 const ROUTE_STATE = '/context-guard/state'
 const ROUTE_HANDOFF = '/context-guard/handoff'
 const WARN_RATIO = 0.6
@@ -391,6 +395,52 @@ async function buildHandoff(session, analysis) {
   return { path: file, markdown }
 }
 
+function effortPath() {
+  const base = process.env.DSH_PROFILE_DIR
+    || (process.env.DSH_HOME ? resolve(process.env.DSH_HOME) : join(homedir(), '.dsh'))
+  return join(base, 'wide-focus', 'effort.json')
+}
+
+const effortDefaults = () => ({ mode: 'auto', fixed: 'high' })
+
+async function readEffort(file) {
+  try {
+    const raw = await readFile(file, 'utf8')
+    const parsed = JSON.parse(raw)
+    const mode = ['auto', 'suggest', 'fixed'].includes(parsed.mode) ? parsed.mode : 'auto'
+    const fixed = EFFORT_LEVELS.includes(parsed.fixed) ? parsed.fixed : 'high'
+    return { mode, fixed }
+  } catch {
+    return effortDefaults()
+  }
+}
+
+async function writeEffort(file, next) {
+  const tmp = file + '.tmp'
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(tmp, JSON.stringify(next, null, 2) + '\n', 'utf8')
+  await rename(tmp, file)
+}
+
+function recommendEffort(text) {
+  const value = String(text || '').trim()
+  if (!value) return { effort: 'high', reason: '没有拿到本轮提问，保持默认' }
+  const short = value.length <= 40
+  const confirm = short && /^(继续|好|好的|可以|嗯|是|是的|行|对|ok|okay|谢谢|收到|明白)/i.test(value)
+  if (confirm) return { effort: 'low', reason: '短确认 / 继续指令' }
+  const code = /```/.test(value)
+  const heavy = /(架构|重构|设计|方案|调试|排查|为什么|多文件|全部|彻底|深入|性能|优化|测试失败|报错|崩溃|分析)/i.test(value)
+  const deep = /(全面|系统性地|彻底|一次性|仔细|全部改|重构一遍)/i.test(value)
+  const todo = /(实现|新增|添加|修改|修复|改一下|换成|调整|删除|合并|迁移)/i.test(value)
+  if (deep && (code || value.length > 200)) return { effort: 'max', reason: '大范围 / 深挖型任务' }
+  if (heavy && (code || value.length > 120)) return { effort: 'high', reason: '排查、设计或多文件改动' }
+  if (value.length > 900) return { effort: 'max', reason: '长需求，信息量很大' }
+  if (todo && !code && value.length < 200) return { effort: 'high', reason: '代码改动' }
+  if (!code && value.length < 120 && !/\?$/.test(value)) return { effort: 'low', reason: '短问答' }
+  if (/(为什么|怎么回事|报错|失败)/.test(value)) return { effort: 'high', reason: '需要定位原因' }
+  return { effort: 'high', reason: '默认保持高一点' }
+}
+
 export function apply(ctx) {
   const file = dataPath()
 
@@ -416,6 +466,88 @@ export function apply(ctx) {
       sendJson(res, message === 'payload_too_large' ? 413 : 500, { ok: false, error: { code: 'storage_error', message } })
     }
   }
+
+  const effortFile = effortPath()
+  let effort = effortDefaults()
+  let lastUserText = ''
+  let lastApplied = null
+  let lastObserved = null
+  let lastAdvice = { effort: 'high', reason: '尚未观察' }
+
+  void readEffort(effortFile).then((value) => { effort = value })
+
+  ctx.effect(() => ctx.on('session/event', (event) => {
+    try {
+      if (event && event.type === 'user/message') {
+        const text = textOfMessage(event.data && event.data.message)
+        if (text.trim()) lastUserText = text
+      }
+    } catch { /* ignore malformed events */ }
+  }))
+
+  ctx.effect(() => ctx.on('llm/stream', (options) => {
+    if (options && typeof options === 'object' && options.reasoningEffort) lastObserved = String(options.reasoningEffort)
+  }))
+
+  ctx.effect(() => ctx.on('agent/request', async (payload, next) => {
+    const config = await next()
+    if (!config || typeof config !== 'object') return config
+    const advice = recommendEffort(lastUserText)
+    lastAdvice = advice
+    if (!lastObserved) lastObserved = config.reasoningEffort || null
+    try {
+      if (effort.mode === 'fixed') {
+        lastApplied = effort.fixed
+        return { ...config, reasoningEffort: effort.fixed }
+      }
+      if (effort.mode === 'auto') {
+        const manual = Boolean(lastApplied && config.reasoningEffort && config.reasoningEffort !== lastApplied)
+        if (manual) return config
+        lastApplied = advice.effort
+        return { ...config, reasoningEffort: advice.effort }
+      }
+    } catch { /* never break a model call because of the plugin */ }
+    return config
+  }))
+
+  const effortHandler = async (req, res) => {
+    try {
+      if (req.method === 'GET') {
+        sendJson(res, 200, {
+          ok: true,
+          value: {
+            mode: effort.mode,
+            fixed: effort.fixed,
+            levels: EFFORT_LEVELS.map((id) => ({ id, label: EFFORT_LABELS[id] })),
+            current: lastObserved,
+            applied: lastApplied,
+            recommended: lastAdvice.effort,
+            reason: lastAdvice.reason,
+          },
+        })
+        return
+      }
+      if (req.method === 'POST') {
+        const raw = await readBody(req)
+        const parsed = JSON.parse(raw || '{}')
+        const mode = ['auto', 'suggest', 'fixed'].includes(parsed.mode) ? parsed.mode : effort.mode
+        const fixed = EFFORT_LEVELS.includes(parsed.fixed) ? parsed.fixed : effort.fixed
+        effort = { mode, fixed }
+        await writeEffort(effortFile, effort)
+        sendJson(res, 200, { ok: true, value: effort })
+        return
+      }
+      sendJson(res, 405, { ok: false, error: { code: 'method_not_allowed', message: req.method } })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      sendJson(res, message === 'payload_too_large' ? 413 : 500, { ok: false, error: { code: 'effort_failed', message } })
+    }
+  }
+
+  ctx.inject(['webServer'], (webCtx) => {
+    const disposeEffort = webCtx.webServer.register({ kind: 'exact', path: ROUTE_EFFORT, handler: effortHandler })
+    return () => { disposeEffort() }
+  })
 
   ctx.inject(['webServer'], (webCtx) => {
     const dispose = webCtx.webServer.register({ kind: 'exact', path: ROUTE, handler })

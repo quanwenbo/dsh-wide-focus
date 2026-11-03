@@ -143,6 +143,29 @@ dsh plugin --profile desktop add C:\Users\BOB\dsh-plugins\wide-focus
 
 ![上下文管家：占用、缓存、连贯性与继续/新开建议](docs/screenshots/context-card@2x.png)
 
+## 推理档位（自动）
+
+工具条上的小胶囊显示本次请求的推理档位，点开可以三选一：
+
+| 模式 | 行为 |
+| --- | --- |
+| 自动（默认） | 每次发请求前按本轮提问改写 `reasoningEffort`，覆盖当前会话配置 |
+| 只建议 | 不改配置，只在面板里显示「建议 Low / High …」和原因 |
+| 固定 | 永远使用你选的档位 |
+
+档位与 DSH 的枚举一一对应，只有 **Off / Low / High / Max** 四档，不额外发明名字：
+
+- 短确认、「继续」这类指令 → **Low**
+- 实现、修改、修复、单点排查 → **High**
+- 带代码块、跨文件、定位报错、写方案 → **High**
+- 「彻底 / 深入 / 全部改 / 一次性」这类大范围需求 → **Max**
+- **Off 不会被自动选中**，只能自己手动选
+
+实现走宿主 `agent/request` 瀑布：`await next()` 拿到本次调用的冻结配置后，替换其中的
+`reasoningEffort` 再返回。若检测到你手动改过档位（当前档位不等于插件上次写入的值），
+插件会让位、不覆盖。模式与固定档位存 `$DSH_PROFILE_DIR/wide-focus/effort.json`，
+宿主路由 `GET / POST /wide-focus/effort`。
+
 ## 存储
 
 - 任务只有一份：`$DSH_PROFILE_DIR/wide-focus/tasks.json`
