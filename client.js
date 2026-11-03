@@ -1295,7 +1295,7 @@ function EffortChip() {
     setOpen(!open)
   }
 
-  const label = mode === 'manual' ? '手动' : (EFFORT_LABELS[current] || '—')
+  const label = mode === 'manual' ? '手动' : (EFFORT_LABELS[current] || (mode === 'suggest' ? '建议' : '自动'))
   const subtitle = advice
     ? advice.text
     : mode === 'manual'

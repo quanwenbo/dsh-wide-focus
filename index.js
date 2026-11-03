@@ -503,12 +503,19 @@ export function apply(ctx) {
     } catch { /* ignore malformed events */ }
   }))
 
-  ctx.effect(() => ctx.on('llm/stream', (options) => {
-    if (options && typeof options === 'object' && options.reasoningEffort) lastObserved = String(options.reasoningEffort)
+  // llm/stream is a listener waterfall: a listener MUST hand the call on with
+  // next(). Returning undefined breaks the chain, and the caller then tries to
+  // async-iterate undefined ("Cannot read properties of undefined (reading
+  // 'Symbol(Symbol.asyncIterator)')"). We only observe here, so pass it through.
+  ctx.effect(() => ctx.on('llm/stream', (options, next) => {
+    try {
+      if (options && typeof options === 'object' && options.reasoningEffort) lastObserved = String(options.reasoningEffort)
+    } catch { /* observation only */ }
+    return typeof next === 'function' ? next() : undefined
   }))
 
   ctx.effect(() => ctx.on('agent/request', async (payload, next) => {
-    const config = await next()
+    const config = typeof next === 'function' ? await next() : payload
     if (!config || typeof config !== 'object') return config
     const advice = recommendEffort(lastUserText)
     lastAdvice = advice
@@ -530,12 +537,14 @@ export function apply(ctx) {
         const sessions = ctx.get('sessions')
         let ratio = null
         let failures = 0
+        let headerEffort = null
         if (sessionId && sessions && typeof sessions.get === 'function') {
           const session = sessions.get(sessionId)
           if (session) {
             try {
               const analysis = analyze(session, ctx.get('tokenMeter'), ctx.get('sessionProjections'))
               ratio = analysis.ratio
+              headerEffort = analysis.reasoningEffort || null
               failures = failureSignal(session.snapshotEvents())
             } catch { /* advice is best-effort */ }
           }
@@ -554,7 +563,7 @@ export function apply(ctx) {
             mode: effort.mode,
             modes: EFFORT_MODES,
             levels: EFFORT_LEVELS.map((id) => ({ id, label: EFFORT_LABELS[id] })),
-            current: lastObserved,
+            current: lastObserved || headerEffort || lastApplied || null,
             applied: lastApplied,
             recommended: lastAdvice.effort,
             reason: lastAdvice.reason,
