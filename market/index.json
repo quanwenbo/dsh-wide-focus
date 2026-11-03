@@ -1,32 +1,53 @@
 {
   "format": 1,
-  "title": { "en": "Wide Focus plugins", "zh": "宽屏工作台插件" },
-  "description": { "en": "Self-hosted index for dsh-wide-focus.", "zh": "dsh-wide-focus 的自建索引，方便在 DSH 的「发现」里直接搜到。" },
+  "title": {
+    "en": "Wide Focus plugins",
+    "zh": "宽屏工作台插件"
+  },
+  "description": {
+    "en": "Self-hosted index for dsh-wide-focus.",
+    "zh": "dsh-wide-focus 的自建索引，方便在 DSH 的「发现」里直接搜到。"
+  },
   "plugins": [
     {
       "name": "dsh-wide-focus",
-      "title": { "en": "Wide Focus · Task Panel · Context Guard", "zh": "宽屏 · 任务面板 · 上下文管家" },
+      "title": {
+        "en": "Wide Focus · Task Panel · Context Guard",
+        "zh": "宽屏 · 任务面板 · 上下文管家"
+      },
       "description": {
-        "en": "Wide reading layout, a floating tabbed task panel for plans and acceptance, and a live context-pressure chip with keep-or-restart advice.",
-        "zh": "宽屏阅读布局、可拖动的悬浮任务面板（按标签管理待办与验收），以及实时的上下文占用徽章与继续/新开会话建议。"
+        "en": "Wide reading layout, a floating tabbed task panel for plans and acceptance, a live context-pressure chip with keep-or-restart advice, and an automatic reasoning-effort picker.",
+        "zh": "宽屏阅读布局、可拖动的悬浮任务面板（按标签管理待办与验收）、实时上下文占用徽章与继续/新开会话建议，以及可自动切换的推理档位。"
       },
       "icon": "icon.svg",
       "author": "BOB",
       "homepage": "https://github.com/quanwenbo/dsh-wide-focus#readme",
-      "repository": { "url": "https://github.com/quanwenbo/dsh-wide-focus" },
+      "repository": {
+        "url": "https://github.com/quanwenbo/dsh-wide-focus"
+      },
       "metadata": {
-        "keywords": ["wide-mode", "task-panel", "context-guard", "todo", "宽屏", "任务面板", "上下文"]
+        "keywords": [
+          "wide-mode",
+          "task-panel",
+          "context-guard",
+          "todo",
+          "宽屏",
+          "任务面板",
+          "上下文"
+        ]
       },
       "versions": [
         {
-          "version": "0.12.3",
-          "publishTimestamp": 1793635200,
+          "version": "0.13.0",
+          "publishTimestamp": 1793664424,
           "source": {
             "type": "git",
             "url": "https://github.com/quanwenbo/dsh-wide-focus",
-            "commit": "b64badffe79d9ee458fc0ca33528016fee3c6861"
+            "commit": "279f76c"
           },
-          "engines": { "dsh": ">=0.2.0-rc.1 <0.3.0-0" }
+          "engines": {
+            "dsh": ">=0.2.0-rc.1 <0.3.0-0"
+          }
         }
       ]
     }
