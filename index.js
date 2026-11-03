@@ -401,15 +401,16 @@ function effortPath() {
   return join(base, 'wide-focus', 'effort.json')
 }
 
-const effortDefaults = () => ({ mode: 'auto', fixed: 'high' })
+const EFFORT_MODES = ['auto', 'suggest', 'manual']
+
+const effortDefaults = () => ({ mode: 'auto' })
 
 async function readEffort(file) {
   try {
     const raw = await readFile(file, 'utf8')
     const parsed = JSON.parse(raw)
-    const mode = ['auto', 'suggest', 'fixed'].includes(parsed.mode) ? parsed.mode : 'auto'
-    const fixed = EFFORT_LEVELS.includes(parsed.fixed) ? parsed.fixed : 'high'
-    return { mode, fixed }
+    const mode = EFFORT_MODES.includes(parsed.mode) ? parsed.mode : 'auto'
+    return { mode }
   } catch {
     return effortDefaults()
   }
@@ -422,6 +423,9 @@ async function writeEffort(file, next) {
   await rename(tmp, file)
 }
 
+// Auto mode only ever picks Low or High. Max stays a human decision: the
+// moment the plugin starts spending Max tokens on its own it stops being a
+// quiet helper and becomes a bill.
 function recommendEffort(text) {
   const value = String(text || '').trim()
   if (!value) return { effort: 'high', reason: '没有拿到本轮提问，保持默认' }
@@ -429,16 +433,30 @@ function recommendEffort(text) {
   const confirm = short && /^(继续|好|好的|可以|嗯|是|是的|行|对|ok|okay|谢谢|收到|明白)/i.test(value)
   if (confirm) return { effort: 'low', reason: '短确认 / 继续指令' }
   const code = /```/.test(value)
-  const heavy = /(架构|重构|设计|方案|调试|排查|为什么|多文件|全部|彻底|深入|性能|优化|测试失败|报错|崩溃|分析)/i.test(value)
-  const deep = /(全面|系统性地|彻底|一次性|仔细|全部改|重构一遍)/i.test(value)
-  const todo = /(实现|新增|添加|修改|修复|改一下|换成|调整|删除|合并|迁移)/i.test(value)
-  if (deep && (code || value.length > 200)) return { effort: 'max', reason: '大范围 / 深挖型任务' }
-  if (heavy && (code || value.length > 120)) return { effort: 'high', reason: '排查、设计或多文件改动' }
-  if (value.length > 900) return { effort: 'max', reason: '长需求，信息量很大' }
-  if (todo && !code && value.length < 200) return { effort: 'high', reason: '代码改动' }
-  if (!code && value.length < 120 && !/\?$/.test(value)) return { effort: 'low', reason: '短问答' }
-  if (/(为什么|怎么回事|报错|失败)/.test(value)) return { effort: 'high', reason: '需要定位原因' }
-  return { effort: 'high', reason: '默认保持高一点' }
+  const todo = /(实现|新增|添加|修改|修复|改一下|改成|改为|换成|换掉|调整|优化|删除|去掉|合并|迁移|重构|排查|调试|设计|方案|接入|加个|加上|增加|做个|写个|调大|调小|放大|缩小|加宽|变窄)/.test(value)
+  const question = /^(什么|为什么|怎么|如何|是否|能否|多少|哪)/.test(value) || /\?$/.test(value) || /？$/.test(value)
+  if (!code && question && value.length < 220) return { effort: 'low', reason: '单点问答 / 查概念' }
+  if (!code && !todo && value.length < 60) return { effort: 'low', reason: '短句，不需要深想' }
+  return { effort: 'high', reason: todo ? '要动手或定位问题' : '默认略高一点' }
+}
+
+// Repeated failures are worth a nudge, never an automatic switch.
+function failureSignal(events) {
+  if (!Array.isArray(events)) return 0
+  let failures = 0
+  for (const event of events.slice(-80)) {
+    const data = event && event.data
+    if (!data || typeof data !== 'object') continue
+    if (data.isError === true) failures += 1
+    const message = data.message
+    const content = message && Array.isArray(message.content) ? message.content : []
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue
+      if (block.isError === true) failures += 1
+      else if (typeof block.text === 'string' && /(^|\n)\s*(Error|TypeError|ReferenceError|SyntaxError|exit code: [1-9]|命令失败|Traceback)/.test(block.text)) failures += 1
+    }
+  }
+  return failures
 }
 
 export function apply(ctx) {
@@ -494,35 +512,55 @@ export function apply(ctx) {
     if (!config || typeof config !== 'object') return config
     const advice = recommendEffort(lastUserText)
     lastAdvice = advice
-    if (!lastObserved) lastObserved = config.reasoningEffort || null
+    if (config.reasoningEffort) lastObserved = String(config.reasoningEffort)
+    if (effort.mode !== 'auto') return config
     try {
-      if (effort.mode === 'fixed') {
-        lastApplied = effort.fixed
-        return { ...config, reasoningEffort: effort.fixed }
-      }
-      if (effort.mode === 'auto') {
-        const manual = Boolean(lastApplied && config.reasoningEffort && config.reasoningEffort !== lastApplied)
-        if (manual) return config
-        lastApplied = advice.effort
-        return { ...config, reasoningEffort: advice.effort }
-      }
-    } catch { /* never break a model call because of the plugin */ }
-    return config
+      const manual = Boolean(lastApplied && config.reasoningEffort && String(config.reasoningEffort) !== lastApplied)
+      if (manual) return config
+      lastApplied = advice.effort
+      return { ...config, reasoningEffort: advice.effort }
+    } catch { return config }
   }))
 
   const effortHandler = async (req, res) => {
     try {
       if (req.method === 'GET') {
+        const url = new URL(req.url || '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId') || ''
+        const sessions = ctx.get('sessions')
+        let ratio = null
+        let failures = 0
+        if (sessionId && sessions && typeof sessions.get === 'function') {
+          const session = sessions.get(sessionId)
+          if (session) {
+            try {
+              const analysis = analyze(session, ctx.get('tokenMeter'), ctx.get('sessionProjections'))
+              ratio = analysis.ratio
+              failures = failureSignal(session.snapshotEvents())
+            } catch { /* advice is best-effort */ }
+          }
+        }
+        let advice = null
+        if (effort.mode !== 'manual' && ratio !== null) {
+          if (ratio >= 0.8) {
+            advice = { kind: 'handoff', text: `上下文已 ${Math.round(ratio * 100)}%，强烈建议生成交接后开新会话` }
+          } else if (failures >= 2) {
+            advice = { kind: 'escalate', text: '连续遇阻，可手动切到 Max，或先交接' }
+          }
+        }
         sendJson(res, 200, {
           ok: true,
           value: {
             mode: effort.mode,
-            fixed: effort.fixed,
+            modes: EFFORT_MODES,
             levels: EFFORT_LEVELS.map((id) => ({ id, label: EFFORT_LABELS[id] })),
             current: lastObserved,
             applied: lastApplied,
             recommended: lastAdvice.effort,
             reason: lastAdvice.reason,
+            ratio,
+            failures,
+            advice,
           },
         })
         return
@@ -530,9 +568,8 @@ export function apply(ctx) {
       if (req.method === 'POST') {
         const raw = await readBody(req)
         const parsed = JSON.parse(raw || '{}')
-        const mode = ['auto', 'suggest', 'fixed'].includes(parsed.mode) ? parsed.mode : effort.mode
-        const fixed = EFFORT_LEVELS.includes(parsed.fixed) ? parsed.fixed : effort.fixed
-        effort = { mode, fixed }
+        const mode = EFFORT_MODES.includes(parsed.mode) ? parsed.mode : effort.mode
+        effort = { mode }
         await writeEffort(effortFile, effort)
         sendJson(res, 200, { ok: true, value: effort })
         return

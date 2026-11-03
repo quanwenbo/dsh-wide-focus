@@ -1244,6 +1244,7 @@ window.__ModuleLoader__.load({
     }
 
     const EFFORT_LABELS = { off: 'Off', low: 'Low', high: 'High', max: 'Max' }
+    const EFFORT_MODE_LABELS = { auto: '自动', suggest: '建议', manual: '手动' }
 
 function EffortChip() {
   const [data, setData] = useState(null)
@@ -1252,7 +1253,10 @@ function EffortChip() {
   const buttonRef = useRef(null)
 
   const load = () => {
-    fetch('/wide-focus/effort', { cache: 'no-store' })
+    const bridge = window.__dshWideFocus
+    const sessionId = bridge && typeof bridge.getSessionId === 'function' ? (bridge.getSessionId() || '') : ''
+    const url = '/wide-focus/effort' + (sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : '')
+    fetch(url, { cache: 'no-store' })
       .then((res) => res.json())
       .then((json) => { if (json && json.ok && json.value) setData(json.value) })
       .catch(() => {})
@@ -1265,13 +1269,14 @@ function EffortChip() {
   }, [])
 
   const mode = data ? data.mode : 'auto'
-  const current = data ? (data.current || data.applied || data.recommended) : null
+  const current = data ? (data.current || data.applied || null) : null
+  const advice = data ? data.advice : null
 
-  const save = (next, fixed) => {
+  const save = (next) => {
     fetch('/wide-focus/effort', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: next, fixed }),
+      body: JSON.stringify({ mode: next }),
     })
       .then((res) => res.json())
       .then((json) => { if (json && json.ok && json.value) { setData((old) => ({ ...(old || {}), ...json.value })); load() } })
@@ -1290,39 +1295,38 @@ function EffortChip() {
     setOpen(!open)
   }
 
-  const levels = (data && Array.isArray(data.levels) && data.levels.length)
-    ? data.levels
-    : [{ id: 'off', label: 'Off' }, { id: 'low', label: 'Low' }, { id: 'high', label: 'High' }, { id: 'max', label: 'Max' }]
-  const modeText = mode === 'auto' ? '自动' : mode === 'suggest' ? '只建议' : '固定'
+  const label = mode === 'manual' ? '手动' : (EFFORT_LABELS[current] || '—')
+  const subtitle = advice
+    ? advice.text
+    : mode === 'manual'
+      ? '档位建议已关闭，档位请在输入框旁自行切换'
+      : data
+        ? ('建议 ' + (EFFORT_LABELS[data.recommended] || '—') + '，' + data.reason)
+        : '读取中…'
 
   return h('span', { className: 'wf-effort-wrap' },
     h('button', {
       ref: buttonRef,
       type: 'button',
-      className: 'wf-effort wf-effort-' + mode,
-      title: '推理档位：' + modeText + (current ? '（当前 ' + (EFFORT_LABELS[current] || current) + '）' : ''),
+      className: 'wf-effort wf-effort-' + mode + (advice ? ' wf-effort-advice' : ''),
+      title: mode === 'manual'
+        ? '档位建议：已关闭（手动）'
+        : '推理档位：' + EFFORT_MODE_LABELS[mode] + (current ? '（当前 ' + (EFFORT_LABELS[current] || current) + '）' : ''),
       onClick: toggle,
     },
       h('span', { className: 'wf-effort-dot' }),
-      h('span', { className: 'wf-effort-label' }, EFFORT_LABELS[current] || '—')),
+      h('span', { className: 'wf-effort-label' }, label)),
     open ? h('div', { className: 'wf-effort-pop', style: pos ? { left: pos.left + 'px', top: pos.top + 'px' } : undefined },
       h('div', { className: 'wf-effort-title' }, '推理档位'),
       h('div', { className: 'wf-effort-modes' },
-        [['auto', '自动'], ['suggest', '只建议'], ['fixed', '固定']].map(([key, label]) => h('button', {
+        ['auto', 'suggest', 'manual'].map((key) => h('button', {
           key,
           type: 'button',
           className: 'wf-effort-mode' + (mode === key ? ' wf-effort-mode-on' : ''),
           onClick: () => save(key),
-        }, label))),
-      h('div', { className: 'wf-effort-sub' }, data
-        ? ('建议 ' + (EFFORT_LABELS[data.recommended] || '—') + '，' + data.reason)
-        : '读取中…'),
-      h('div', { className: 'wf-effort-levels' }, levels.map((level) => h('button', {
-        key: level.id,
-        type: 'button',
-        className: 'wf-effort-level' + (current === level.id ? ' wf-effort-level-on' : ''),
-        onClick: () => save('fixed', level.id),
-      }, level.label || EFFORT_LABELS[level.id] || level.id)))) : null)
+        }, EFFORT_MODE_LABELS[key]))),
+      h('div', { className: 'wf-effort-sub' }, subtitle),
+      h('div', { className: 'wf-effort-hint' }, mode === 'auto' ? '只会自动选 Low 或 High，Max 留给你手动切' : '档位在输入框旁自行切换')) : null)
 }
 
 function TaskPanel() {
@@ -2329,7 +2333,8 @@ function TaskPanel() {
       .wf-effort:hover { color: #fff; }
       .wf-effort-dot { width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; }
       .wf-effort-suggest .wf-effort-dot { background: #fbbf24; }
-      .wf-effort-fixed .wf-effort-dot { background: #9aa0ab; }
+      .wf-effort-manual .wf-effort-dot { background: #6b7280; }
+      .wf-effort-advice { box-shadow: inset 0 0 0 1px rgba(251,191,36,.45); }
       .wf-effort-label { font-variant-numeric: tabular-nums; }
       .wf-effort-pop { position: fixed; z-index: 2147483200; width: 236px; padding: 10px; border-radius: 10px;
         border: 1px solid rgba(125,146,255,.38); background: #1b1b22; color: #e7e9ef; font-size: 12px;
@@ -2340,17 +2345,14 @@ function TaskPanel() {
         background: #24272e; color: #cfd3dc; font-size: 11px; cursor: pointer; }
       .wf-effort-mode-on { background: #f4f4f5; color: #0b0b0e; border-color: transparent; font-weight: 700; }
       .wf-effort-sub { font-size: 11px; line-height: 1.6; color: #a6acb8; margin-bottom: 8px; }
-      .wf-effort-levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-      .wf-effort-level { height: 28px; border-radius: 6px; border: 1px solid rgba(255,255,255,.12);
-        background: #24272e; color: #cfd3dc; font-size: 11px; cursor: pointer; }
-      .wf-effort-level-on { border-color: #38bdf8; color: #fff; box-shadow: 0 0 0 1px rgba(56,189,248,.55); }
+      .wf-effort-hint { font-size: 11px; line-height: 1.6; color: #7c8494; margin-top: 6px; }
       .wf-theme-light .wf-effort { background: linear-gradient(160deg,#fff,#eef0f5); color: #1b1e24;
         border-color: rgba(15,20,30,.12); box-shadow: inset 1px 1px 0 #fff, 0 2px 0 #b6becd; }
       .wf-theme-light .wf-effort-pop { background: #fff; color: #1b1e24; border-color: rgba(3,105,161,.35); }
-      .wf-theme-light .wf-effort-mode, .wf-theme-light .wf-effort-level { background: #f1f3f7; color: #333; border-color: rgba(15,20,30,.12); }
+      .wf-theme-light .wf-effort-mode { background: #f1f3f7; color: #333; border-color: rgba(15,20,30,.12); }
       .wf-theme-light .wf-effort-mode-on { background: #0b0b0e; color: #fff; }
       .wf-theme-light .wf-effort-sub { color: #5b6270; }
-      .wf-tools { display: flex; align-items: center; gap: 8px; }      .wf-tools { display: flex; align-items: center; gap: 8px; }
+      .wf-tools { display: flex; align-items: center; gap: 8px; }
       .wf-tools > * { height: 36px; }
       .wf-tools .cg-chip { height: 36px; border-radius: 8px; }
       .wf-panel-tools .wf-icon-btn { width: 45px; height: 45px; font-size: 25px; }
