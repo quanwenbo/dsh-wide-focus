@@ -275,8 +275,9 @@ function analyze(session, tokenMeter, projections) {
 }
 
 // Exposed for local probes: the measurement chain is the part most likely to
-// drift when DSH changes its usage/projection contracts.
-export const __test = { analyze }
+// drift when DSH changes its usage/projection contracts. buildHandoff is here
+// so a missing import cannot ship as a runtime 500 again.
+export const __test = { analyze, buildHandoff }
 
 
 function profileDir() {
