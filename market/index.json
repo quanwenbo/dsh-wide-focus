@@ -38,12 +38,12 @@
       },
       "versions": [
         {
-          "version": "0.13.3",
-          "publishTimestamp": 1793800000,
+          "version": "0.13.4",
+          "publishTimestamp": 1793886400,
           "source": {
             "type": "git",
             "url": "https://github.com/quanwenbo/dsh-wide-focus",
-            "commit": "3a5c7cfd32138dd7611c0169a2e2faad02f04e11"
+            "commit": "00931d16066b74dbdffa673b7730c277106cf210"
           },
           "engines": {
             "dsh": ">=0.2.0-rc.1 <0.3.0-0"
