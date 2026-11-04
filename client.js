@@ -3256,8 +3256,10 @@ function TaskPanel() {
         try {
           const result = await buildHandoff(String(sessionId))
           setHandoff(result || null)
-          if (result && result.path) await copyText(result.path)
+          // Copy the summary (that is what the next session needs); the file
+          // path stays visible in the card and in the toast.
           if (result && result.markdown) await copyText(result.markdown)
+          else if (result && result.path) await copyText(result.path)
           showToast(t(lang, 'handoffDone') + (result && result.path ? '：' + result.path : ''))
           if (uiWorkspaceService && typeof uiWorkspaceService.startSession === 'function') {
             uiWorkspaceService.startSession()
