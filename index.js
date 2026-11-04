@@ -280,7 +280,7 @@ export const __test = { analyze }
 
 
 function profileDir() {
-  const base = process.env.DSH_PROFILE_DIR || process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+  const base = process.env.DSH_PROFILE_DIR || process.env.DSH_HOME || join(os.homedir(), '.dsh')
   return base
 }
 
@@ -309,7 +309,7 @@ function stamp(date) {
 
 async function readOpenTodos() {
   try {
-    const file = path.join(profileDir(), 'wide-focus', 'tasks.json')
+    const file = join(profileDir(), 'wide-focus', 'tasks.json')
     const raw = await fs.readFile(file, 'utf8')
     const parsed = JSON.parse(raw)
     const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : []
@@ -388,9 +388,9 @@ async function buildHandoff(session, analysis) {
   lines.push('')
 
   const markdown = lines.join('\n')
-  const dir = path.join(cwd, 'docs', 'handoff')
+  const dir = join(cwd, 'docs', 'handoff')
   await fs.mkdir(dir, { recursive: true })
-  const file = path.join(dir, `${stamp(new Date())}-${sessionShort}.md`)
+  const file = join(dir, `${stamp(new Date())}-${sessionShort}.md`)
   await fs.writeFile(file, markdown, 'utf8')
   return { path: file, markdown }
 }
